@@ -221,7 +221,7 @@ The system is built on a three-tier architecture: a React SPA frontend, a FastAP
 └──────────────────┬───────────────────────────────────────────┘
                    │
 ┌──────────────────▼───────────────────────────────────────────┐
-│  DATA LAYER                                                   │
+│  DATA LAYER                                                  │
 │  SQLite (local file) · Local filesystem (uploads/ exports/)  │
 └──────────────────────────────────────────────────────────────┘
 ```
