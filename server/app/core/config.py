@@ -21,6 +21,21 @@ class Settings(BaseSettings):
     app_cors_origins: str = "http://localhost:5173"
 
     database_url: str = "sqlite:///./bra_tool.db"
+    database_url_sync: str = "sqlite:///./bra_tool.db"
+
+    redis_url: str = "redis://localhost:6379/0"
+
+    s3_endpoint_url: str | None = None
+    s3_access_key: str | None = None
+    s3_secret_key: str | None = None
+    s3_region: str = "us-east-1"
+    s3_bucket_uploads: str = "bra-uploads"
+    s3_bucket_exports: str = "bra-exports"
+
+    openai_api_key: str | None = None
+    anthropic_api_key: str | None = None
+    default_model_provider: str = "openai"
+    default_model_name: str = "gpt-4o-mini"
 
     upload_dir: Path = Path("./uploads")
     export_dir: Path = Path("./exports")
@@ -39,6 +54,7 @@ class Settings(BaseSettings):
 
     @property
     def cors_origins_list(self) -> list[str]:
+        """Split comma-separated CORS origins into a clean list."""
         return [origin.strip() for origin in self.app_cors_origins.split(",") if origin.strip()]
 
 

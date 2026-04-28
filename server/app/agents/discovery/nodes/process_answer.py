@@ -4,27 +4,17 @@ import uuid
 from copy import deepcopy
 from datetime import datetime, timezone
 
+from app.services.llm_gateway import call_structured_json
 from app.shared.state_types import DeltaChange, DiscoveryState
 
 
 def _now_iso() -> str:
+    """Return current UTC timestamp."""
     return datetime.now(timezone.utc).isoformat()
 
 
 def process_answer_node(state: DiscoveryState) -> dict:
-    """Apply the user's answer to analyser_output and record audit trail.
-
-    Placeholder: stores the answer in qa_history and clears current_question
-    without mutating analyser_output (no LLM-generated patches yet).
-
-    Real impl will:
-    - If status == 'answered': ask LLM for RFC 6902 JSON patches, apply
-      them deterministically with the jsonpatch library, log DeltaChange
-      per patch.
-    - If status == 'deferred': tag the open question priority='low'.
-    - If status == 'na': remove the question from open_questions entirely.
-    - If status == 'unknown': leave in open_questions for analytics.
-    """
+    """Apply one user answer into analyser output and log change history."""
     qa = state.get("current_question")
     if qa is None:
         # Defensive: nothing to process.
@@ -47,12 +37,49 @@ def process_answer_node(state: DiscoveryState) -> dict:
             if q["question_id"] != qa["question_id"]
         ]
 
-    # Placeholder delta (no real patch yet)
+    elif status == "answered":
+        answer = (qa.get("answer") or "").strip()
+        if answer:
+            # Step 1: keep deterministic requirement append so output is never empty.
+            req_id = f"FR-QA-{len(new_analyser['functional_requirements']) + 1:03d}"
+            new_analyser["functional_requirements"].append(
+                {
+                    "req_id": req_id,
+                    "description": f"Decision from {qa['question_id']}: {answer}",
+                    "moscow": "should_have",
+                    "acceptance_hints": ["Validated by stakeholder answer during discovery."],
+                    "source": "qa",
+                    "source_ref": qa["question_id"],
+                }
+            )
+
+            # Step 2: optional LLM JSON Patch for richer updates.
+            patch_payload = call_structured_json(
+                prompt=(
+                    "Create RFC6902 patch list for analyser_output based on this answered question. "
+                    "Return JSON {\"patches\": [...]} only.\n"
+                    f"Question: {qa['question']}\nAnswer: {answer}\n"
+                    f"Current analyser_output: {new_analyser}"
+                ),
+                fallback={"patches": []},
+            )
+            patches = patch_payload.get("patches", [])
+            if isinstance(patches, list) and patches:
+                try:
+                    import jsonpatch
+
+                    patched = jsonpatch.apply_patch(deepcopy(new_analyser), patches, in_place=False)
+                    if isinstance(patched, dict):
+                        new_analyser = patched
+                except Exception:
+                    # Ignore patch errors and keep deterministic data.
+                    pass
+
     new_deltas.append(DeltaChange(
         change_id=str(uuid.uuid4()),
         source="qa",
         source_ref=qa["question_id"],
-        field_path="(placeholder — no patch applied yet)",
+        field_path="analyser_output.functional_requirements",
         old_value=None,
         new_value=str(qa.get("answer", "")),
         timestamp=_now_iso(),

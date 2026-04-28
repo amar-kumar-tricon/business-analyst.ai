@@ -57,7 +57,7 @@ async def lifespan(app: FastAPI):
     log.info("Export dir: %s", settings.export_dir.resolve())
 
     # 3. database — import models so metadata is populated, then create tables
-    import app.db.models  # noqa: F401  (registers ORM classes on Base.metadata)
+    from app.db import models as _models  # noqa: F401  (registers ORM classes on Base.metadata)
 
     Base.metadata.create_all(bind=engine)
     log.info("Database ready at %s", settings.database_url)
@@ -74,6 +74,7 @@ async def lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
+    """Create and configure FastAPI app instance."""
     app = FastAPI(
         title="BRA Tool API",
         version="0.1.0",
@@ -94,6 +95,7 @@ def create_app() -> FastAPI:
 
     @app.get("/health", tags=["meta"])
     async def health() -> dict[str, str]:
+        """Health endpoint used by local/dev checks."""
         return {"status": "ok"}
 
     return app

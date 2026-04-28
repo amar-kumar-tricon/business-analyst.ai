@@ -10,20 +10,11 @@ def _now_iso() -> str:
 
 
 def finalize_doc_node(state: DiscoveryState) -> dict:
-    """Render analyser_output + qa_history into a markdown document.
-
-    Placeholder: produces a minimal stub markdown so the parent graph can
-    proceed to human_review_2 and artifact_export without errors.
-
-    Real impl will:
-    - Use a Jinja2 template (app/templates/final_analysis.md.j2).
-    - Group functional requirements by MoSCoW bucket.
-    - Sort risks by severity.
-    - Append a Q&A Decisions section from qa_history (answered only).
-    - Add a completeness score section.
-    """
+    """Render analyser output and discovery decisions into final markdown."""
     ao = state["analyser_output"]
     now = _now_iso()
+    weighted = ao.get("completeness_score", {}).get("weighted_total", 0.0)
+    overview = ao.get("project_overview", {})
 
     lines = [
         f"# Business Requirements Analysis",
@@ -33,6 +24,12 @@ def finalize_doc_node(state: DiscoveryState) -> dict:
         f"## Executive Summary",
         f"",
         ao.get("executive_summary", "_No summary yet._"),
+        f"",
+        f"## Project Overview",
+        f"",
+        f"- Objective: {overview.get('objective', 'N/A')}",
+        f"- Scope: {overview.get('scope', 'N/A')}",
+        f"- Out of scope: {overview.get('out_of_scope', 'N/A')}",
         f"",
         f"## Functional Requirements",
         f"",
@@ -59,6 +56,12 @@ def finalize_doc_node(state: DiscoveryState) -> dict:
             lines.append(f"**Q:** {qa['question']}  ")
             lines.append(f"**A:** {qa.get('answer', '_no answer_')}")
             lines.append(f"")
+
+    lines += [
+        f"## Completeness",
+        f"",
+        f"Current completeness score: **{weighted}/10**",
+    ]
 
     markdown = "\n".join(lines)
     return {"final_doc_markdown": markdown}
