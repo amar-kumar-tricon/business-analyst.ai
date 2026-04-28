@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from langgraph.graph import END, START, StateGraph
 
-from server.app.agents.analyser.nodes.analyse import analyse_node
-from server.app.agents.analyser.nodes.enrich import enrich_node
-from server.app.agents.analyser.nodes.score import score_node
+from app.agents.analyser.nodes.analyse import analyse_node
+from app.agents.analyser.nodes.enrich import enrich_node
+from app.agents.analyser.nodes.score import score_node
 from app.shared.state_types import AnalyserState
 
 

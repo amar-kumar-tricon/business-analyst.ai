@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from langgraph.graph import END, START, StateGraph
 
-from server.app.agents.discovery.nodes.await_answer import await_answer_node
-from server.app.agents.discovery.nodes.finalize_doc import finalize_doc_node
-from server.app.agents.discovery.nodes.generate_question import generate_question_node
-from server.app.agents.discovery.nodes.prioritize import prioritize_questions_node
-from server.app.agents.discovery.nodes.process_answer import process_answer_node
+from app.agents.discovery.nodes.await_answer import await_answer_node
+from app.agents.discovery.nodes.finalize_doc import finalize_doc_node
+from app.agents.discovery.nodes.generate_question import generate_question_node
+from app.agents.discovery.nodes.prioritize import prioritize_questions_node
+from app.agents.discovery.nodes.process_answer import process_answer_node
 from app.shared.state_types import DiscoveryState
 
 
