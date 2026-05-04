@@ -17,6 +17,7 @@ from app.services.workflow import (
     get_project_state,
     init_project_state,
     resume_discovery,
+    run_architecture,
     run_stage1_and_discovery,
 )
 from app.shared.event_bus import event_bus
@@ -220,6 +221,27 @@ async def approve_project(project_id: str, payload: ApproveRequest) -> dict:
         "status": "approved",
         "final_doc_pdf_s3_key": updated.get("final_doc_pdf_s3_key"),
         "final_doc_docx_s3_key": updated.get("final_doc_docx_s3_key"),
+    }
+
+
+@projects_router.post("/{project_id}/architecture")
+async def run_project_architecture(project_id: str) -> dict:
+    """Run Stage-3 architecture diagram generation."""
+    state = get_project_state(project_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="Project runtime state not found")
+    if not state.get("analyser_output"):
+        raise HTTPException(status_code=409, detail="Run Stage 1+2 first (POST /run)")
+
+    updated = run_architecture(project_id)
+    save_state_snapshot(project_id, updated)
+
+    arch = updated.get("architecture_output", {})
+    return {
+        "project_id": project_id,
+        "architecture_output": arch,
+        "mermaid_count": len(arch.get("mermaid", [])),
+        "plantuml_count": len(arch.get("plantuml", [])),
     }
 
 

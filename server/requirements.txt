@@ -4,38 +4,38 @@
 # ============================================================
 
 # ---- Web framework ----
-fastapi==0.111.0
-uvicorn[standard]==0.30.1
-python-multipart==0.0.9         # multipart/form-data (file uploads)
-websockets==12.0
+fastapi>=0.111.0
+uvicorn[standard]>=0.30.1
+python-multipart>=0.0.9         # multipart/form-data (file uploads)
+websockets>=12.0
 
 # ---- Data validation / settings ----
-pydantic==2.7.1
-pydantic-settings==2.2.1
+pydantic>=2.7.1
+pydantic-settings>=2.2.1
 
 # ---- LLM / agent orchestration ----
-langchain==0.2.1
-langchain-openai==0.1.7
-langchain-anthropic==0.1.13
-langgraph==0.0.55
-tiktoken==0.7.0
+langchain>=0.2.1
+langchain-openai>=0.1.7
+langchain-anthropic>=0.1.13
+langgraph>=0.0.55
+tiktoken>=0.7.0
 
 # ---- Document parsing ----
-pymupdf==1.24.5                 # PDF
-python-docx==1.1.2              # DOCX
-python-pptx==0.6.23             # PPTX
-openpyxl==3.1.2                 # XLSX
+pymupdf>=1.24.5                 # PDF
+python-docx>=1.1.2              # DOCX
+python-pptx>=0.6.23             # PPTX
+openpyxl>=3.1.2                 # XLSX
 
 # ---- Database (SQLite default — SQLAlchemy can point to Postgres later) ----
-sqlalchemy==2.0.30
-alembic==1.13.1
+sqlalchemy>=2.0.30
+alembic>=1.13.1
 
 # ---- Export ----
-weasyprint==62.1                # PDF
+weasyprint>=62.1                # PDF
 # python-docx (above) also handles DOCX export
 
 # ---- Dev tooling ----
-ruff==0.4.4
+ruff>=0.4.4
 pytest==8.3.2
 redis==5.0.7
 jsonpatch==1.33

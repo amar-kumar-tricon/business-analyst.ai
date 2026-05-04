@@ -122,6 +122,8 @@ class GraphState(TypedDict):
     final_doc_pdf_s3_key: str | None
     final_doc_docx_s3_key: str | None
 
+    architecture_output: dict | None
+
     review_1_status: Literal["pending", "edits_made", "approved"]
     review_2_status: Literal["pending", "edits_made", "more_questions", "approved"]
     user_edits_payload: dict | None
