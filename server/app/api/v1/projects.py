@@ -14,9 +14,13 @@ from app.services.storage import upload_local_file
 from app.services.workflow import (
     append_parsed_document,
     approve_and_export,
+    approve_architecture,
+    approve_sprint,
     get_project_state,
     init_project_state,
     resume_discovery,
+    run_architecture_stage,
+    run_sprint_stage,
     run_stage1_and_discovery,
 )
 from app.shared.event_bus import event_bus
@@ -82,6 +86,11 @@ class AnswerRequest(BaseModel):
 
 
 class ApproveRequest(BaseModel):
+    user_edits_payload: dict | None = None
+
+
+class SprintApproveRequest(BaseModel):
+    sprint_notes: str | None = None
     user_edits_payload: dict | None = None
 
 
@@ -242,3 +251,243 @@ async def get_project_events(project_id: str) -> dict:
         "project_id": project_id,
         "events": event_bus.backlog(project_id),
     }
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Stage 3 — Architecture endpoints
+# ──────────────────────────────────────────────────────────────────────────────
+
+@projects_router.post(
+    "/{project_id}/architecture/run",
+    tags=["architecture"],
+    summary="Run Architecture Agent (mocked)",
+)
+async def run_architecture(project_id: str) -> dict:
+    """
+    Trigger Stage-3 Architecture Agent.
+
+    Generates mocked Mermaid + PlantUML diagrams based on the approved
+    Stage-1 analyser output.  Returns the full `architecture_output`.
+
+    **Note:** The Architecture Agent is currently using mocked data
+    (`is_mocked: true`). Replace with the real agent when ready.
+    """
+    state = get_project_state(project_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="Project runtime state not found")
+    if not state.get("analyser_output"):
+        raise HTTPException(
+            status_code=409,
+            detail="Stage 1 (Analyser) must be completed before running Architecture stage.",
+        )
+
+    updated = run_architecture_stage(project_id)
+    save_state_snapshot(project_id, updated)
+
+    arch = updated.get("architecture_output") or {}
+    return {
+        "project_id": project_id,
+        "architecture_output": arch,
+        "diagram_count": len(arch.get("diagrams", [])),
+        "is_mocked": arch.get("is_mocked", True),
+    }
+
+
+@projects_router.get(
+    "/{project_id}/architecture",
+    tags=["architecture"],
+    summary="Get Architecture output",
+)
+async def get_architecture(project_id: str) -> dict:
+    """
+    Return the current `architecture_output` for the project.
+
+    Includes all diagram DSL strings (Mermaid / PlantUML) and tech stack notes.
+    Returns 404 if the Architecture stage has not been run yet.
+    """
+    state = get_project_state(project_id)
+    if state is None:
+        persisted = load_state_snapshot(project_id)
+        if persisted is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        state = persisted
+
+    arch = state.get("architecture_output")
+    if not arch:
+        raise HTTPException(
+            status_code=404,
+            detail="Architecture stage has not been run yet. Call POST /architecture/run first.",
+        )
+    return {
+        "project_id": project_id,
+        "architecture_output": arch,
+        "review_3_status": state.get("review_3_status", "pending"),
+    }
+
+
+@projects_router.post(
+    "/{project_id}/architecture/approve",
+    tags=["architecture"],
+    summary="Approve Architecture output",
+)
+async def approve_architecture_endpoint(project_id: str, payload: ApproveRequest) -> dict:
+    """
+    Approve Stage-3 architecture diagrams and advance pipeline to Sprint stage.
+
+    Optional `user_edits_payload` is stored for audit purposes.
+    """
+    state = get_project_state(project_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="Project runtime state not found")
+    if not state.get("architecture_output"):
+        raise HTTPException(
+            status_code=409,
+            detail="No architecture output to approve. Run POST /architecture/run first.",
+        )
+
+    updated = approve_architecture(project_id, payload.user_edits_payload)
+    save_state_snapshot(project_id, updated)
+
+    return {
+        "project_id": project_id,
+        "review_3_status": updated.get("review_3_status"),
+        "message": "Architecture approved. You can now run the Sprint stage.",
+    }
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Stage 4 — Sprint Planning endpoints
+# ──────────────────────────────────────────────────────────────────────────────
+
+@projects_router.post(
+    "/{project_id}/sprint/run",
+    tags=["sprint"],
+    summary="Run Sprint Planning Agent",
+)
+async def run_sprint(project_id: str) -> dict:
+    """
+    Trigger Stage-4 Sprint Planning Agent.
+
+    **Inputs (from state):**
+    - `analyser_output` — Stage 1 functional requirements, risks, team (required)
+    - `architecture_output` — Stage 3 diagrams + tech notes (auto-mocked if missing)
+
+    **Output:**
+    - `sprint_plan` with full sprint breakdown, story points, man-hours, MVP cut-off,
+      team composition, tech stack, and risk register.
+
+    The sprint plan is deterministically generated from requirements and optionally
+    improved by the configured LLM (OpenAI / Anthropic).
+    """
+    state = get_project_state(project_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="Project runtime state not found")
+    if not state.get("analyser_output"):
+        raise HTTPException(
+            status_code=409,
+            detail="Stage 1 (Analyser) must be completed before running Sprint stage.",
+        )
+
+    updated = run_sprint_stage(project_id)
+    save_state_snapshot(project_id, updated)
+
+    plan = updated.get("sprint_plan") or {}
+    return {
+        "project_id": project_id,
+        "sprint_plan": plan,
+        "summary": {
+            "total_sprints": plan.get("total_sprints"),
+            "total_story_points": plan.get("total_story_points"),
+            "total_man_hours": plan.get("total_man_hours"),
+            "mvp_cutoff_sprint": plan.get("mvp_cutoff_sprint"),
+            "sprint_duration_weeks": plan.get("sprint_duration_weeks"),
+        },
+    }
+
+
+@projects_router.get(
+    "/{project_id}/sprint",
+    tags=["sprint"],
+    summary="Get Sprint Plan",
+)
+async def get_sprint(project_id: str) -> dict:
+    """
+    Return the current `sprint_plan` for the project.
+
+    Includes all sprint objects, stories, team composition, tech stack,
+    and risk register.  Returns 404 if Sprint stage has not been run yet.
+    """
+    state = get_project_state(project_id)
+    if state is None:
+        persisted = load_state_snapshot(project_id)
+        if persisted is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        state = persisted
+
+    plan = state.get("sprint_plan")
+    if not plan:
+        raise HTTPException(
+            status_code=404,
+            detail="Sprint stage has not been run yet. Call POST /sprint/run first.",
+        )
+    return {
+        "project_id": project_id,
+        "sprint_plan": plan,
+        "review_4_status": state.get("review_4_status", "pending"),
+    }
+
+
+@projects_router.post(
+    "/{project_id}/sprint/approve",
+    tags=["sprint"],
+    summary="Approve Sprint Plan and finalize project",
+)
+async def approve_sprint_endpoint(project_id: str, payload: SprintApproveRequest) -> dict:
+    """
+    Approve Stage-4 sprint plan — this **finalizes the project** and exports artifacts.
+
+    Optional `sprint_notes` are appended to the sprint plan for audit.
+    After approval:
+    - The RAG approved index is saved.
+    - PDF + DOCX artifacts are generated and stored.
+    - Project status is set to `approved`.
+    """
+    state = get_project_state(project_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="Project runtime state not found")
+    if not state.get("sprint_plan"):
+        raise HTTPException(
+            status_code=409,
+            detail="No sprint plan to approve. Run POST /sprint/run first.",
+        )
+
+    # Merge sprint_notes into user_edits_payload
+    edits = payload.user_edits_payload or {}
+    if payload.sprint_notes:
+        edits["sprint_notes"] = payload.sprint_notes
+
+    updated = approve_sprint(project_id, edits if edits else None)
+    save_state_snapshot(project_id, updated)
+    _persist_index_metadata(project_id, updated.get("version", 1), updated.get("streaming_events", []))
+    _persist_artifact_metadata(project_id, updated.get("version", 1), updated)
+
+    with SessionLocal() as db:
+        project = db.get(Project, project_id)
+        if project is not None:
+            project.status = "approved"
+            db.add(project)
+            db.commit()
+
+    return {
+        "project_id": project_id,
+        "status": "approved",
+        "review_4_status": updated.get("review_4_status"),
+        "final_doc_pdf_s3_key": updated.get("final_doc_pdf_s3_key"),
+        "final_doc_docx_s3_key": updated.get("final_doc_docx_s3_key"),
+        "sprint_plan_summary": {
+            "total_sprints": (updated.get("sprint_plan") or {}).get("total_sprints"),
+            "total_story_points": (updated.get("sprint_plan") or {}).get("total_story_points"),
+            "mvp_cutoff_sprint": (updated.get("sprint_plan") or {}).get("mvp_cutoff_sprint"),
+        },
+    }
+

@@ -98,6 +98,81 @@ class StreamEvent(TypedDict):
     timestamp: str
 
 
+# ──────────────────────────────────────────────
+# Stage 3 — Architecture Agent types
+# ──────────────────────────────────────────────
+
+class ArchitectureDiagram(TypedDict):
+    diagram_id: str
+    title: str
+    diagram_type: Literal[
+        "system_architecture", "data_flow", "user_flow",
+        "entity_relationship", "deployment"
+    ]
+    tool: Literal["mermaid", "plantuml"]
+    dsl: str
+    description: str
+
+
+class ArchitectureResult(TypedDict):
+    diagrams: list[ArchitectureDiagram]
+    tech_stack_notes: str
+    generated_at: str
+    is_mocked: bool  # True until real Architecture Agent is wired in
+
+
+# ──────────────────────────────────────────────
+# Stage 4 — Sprint Planning Agent types
+# ──────────────────────────────────────────────
+
+class SprintStory(TypedDict):
+    story_id: str
+    title: str
+    description: str
+    acceptance_criteria: list[str]
+    story_points: int
+    man_hours: int
+    role: str
+    moscow: Literal["must_have", "should_have", "good_to_have"]
+    sprint_number: int
+    is_mvp: bool
+    source_req_id: str | None
+
+
+class SprintData(TypedDict):
+    sprint_number: int
+    sprint_goal: str
+    stories: list[SprintStory]
+    total_points: int
+    total_hours: int
+    start_week: int
+    end_week: int
+
+
+class SprintPlan(TypedDict):
+    total_sprints: int
+    total_story_points: int
+    total_man_hours: int
+    mvp_cutoff_sprint: int
+    sprint_duration_weeks: int
+    team_composition: dict
+    tech_stack: dict
+    risk_register: list[dict]
+    sprints: list[SprintData]
+    generated_at: str
+
+
+class SprintState(TypedDict):
+    project_id: str
+    version: int
+    analyser_output: AnalyserResult
+    architecture_output: ArchitectureResult | None
+    sprint_plan: SprintPlan | None
+    delta_changes: Annotated[list[DeltaChange], add]
+    streaming_events: Annotated[list[StreamEvent], add]
+    llm_config: dict[str, dict]
+
+
 class GraphState(TypedDict):
     project_id: str
     version: int
@@ -122,8 +197,13 @@ class GraphState(TypedDict):
     final_doc_pdf_s3_key: str | None
     final_doc_docx_s3_key: str | None
 
+    architecture_output: ArchitectureResult | None
+    sprint_plan: SprintPlan | None
+
     review_1_status: Literal["pending", "edits_made", "approved"]
     review_2_status: Literal["pending", "edits_made", "more_questions", "approved"]
+    review_3_status: Literal["pending", "approved", "regenerate"]
+    review_4_status: Literal["pending", "approved"]
     user_edits_payload: dict | None
 
     delta_changes: Annotated[list[DeltaChange], add]
