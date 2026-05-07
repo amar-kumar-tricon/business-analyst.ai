@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-import json
 import uuid
 from datetime import datetime, timezone
 
@@ -9,20 +7,14 @@ from langgraph.graph import END, START, StateGraph
 
 from app.agents.analyser import build_analyser_subgraph
 from app.agents.discovery import build_discovery_subgraph
-from app.services.persistence import save_artifact, save_index
-from app.services.rag import build_working_records
+from app.services.persistence import save_artifact
+from app.services.rag import build_approved_index, build_working_index
 from app.shared.state_types import GraphState
 
 
 def _now_iso() -> str:
     """Return current UTC time in ISO format."""
     return datetime.now(timezone.utc).isoformat()
-
-
-def _chunk_id(project_id: str, heading: str, content: str) -> str:
-    """Create a stable short ID for one chunk."""
-    seed = f"{project_id}:{heading}:{content}".encode("utf-8")
-    return hashlib.sha1(seed).hexdigest()[:16]
 
 
 def ingest_node(state: GraphState) -> dict:
@@ -60,14 +52,11 @@ def ingest_node(state: GraphState) -> dict:
 
 
 def raw_rag_index_node(state: GraphState) -> dict:
-    """Build a working RAG index from parsed sections."""
-    chunk_ids, records = build_working_records(state["project_id"], state.get("parsed_documents", []))
-
-    index_path = save_index(
+    """Chunk + embed parsed sections into the working RAG index."""
+    chunk_ids, index_path = build_working_index(
         project_id=state["project_id"],
         version=state["version"],
-        kind="working",
-        records=records,
+        parsed_documents=state.get("parsed_documents", []),
     )
 
     return {
@@ -150,34 +139,11 @@ def apply_review_2_edits_node(state: GraphState) -> dict:
 
 
 def approved_rag_index_node(state: GraphState) -> dict:
-    """Save approved requirements/risks index for retrieval after sign-off."""
-    analyser = state.get("analyser_output") or {}
-    records = []
-
-    for req in analyser.get("functional_requirements", []):
-        records.append(
-            {
-                "kind": "requirement",
-                "id": req.get("req_id"),
-                "text": req.get("description", ""),
-                "metadata": json.dumps({"moscow": req.get("moscow")}),
-            }
-        )
-    for risk in analyser.get("risks", []):
-        records.append(
-            {
-                "kind": "risk",
-                "id": risk.get("risk_id"),
-                "text": risk.get("description", ""),
-                "metadata": json.dumps({"severity": risk.get("severity")}),
-            }
-        )
-
-    index_path = save_index(
+    """Build a permanent index over approved requirements + risks."""
+    chunk_ids, index_path = build_approved_index(
         project_id=state["project_id"],
         version=state["version"],
-        kind="approved",
-        records=records,
+        analyser_output=state.get("analyser_output") or {},
     )
 
     return {
@@ -186,7 +152,7 @@ def approved_rag_index_node(state: GraphState) -> dict:
                 "event_id": str(uuid.uuid4()),
                 "type": "approved_index_created",
                 "node": "approved_rag_index_node",
-                "payload": {"index_path": index_path, "record_count": len(records)},
+                "payload": {"index_path": index_path, "record_count": len(chunk_ids)},
                 "timestamp": _now_iso(),
             }
         ]

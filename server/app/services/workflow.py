@@ -12,12 +12,32 @@ from app.agents.discovery.nodes.finalize_doc import finalize_doc_node
 from app.agents.discovery.nodes.generate_question import generate_question_node
 from app.agents.discovery.nodes.prioritize import prioritize_questions_node
 from app.agents.discovery.nodes.process_answer import process_answer_node
-from app.agents.graph import artifact_export_node, approved_rag_index_node, ingest_node, raw_rag_index_node
+from app.agents.graph import (
+    apply_review_2_edits_node,
+    artifact_export_node,
+    approved_rag_index_node,
+    ingest_node,
+    raw_rag_index_node,
+)
 from app.shared.event_bus import event_bus
 from app.shared.state_types import GraphState, ParsedDocument, ParsedSection, StreamEvent
 
 
 _PROJECT_STATES: dict[str, GraphState] = {}
+
+# Reducer-style state keys: when a node returns these, the new value should be
+# appended to the existing list rather than overwriting it (mirrors the
+# Annotated[list, add] reducers declared in shared/state_types.py).
+_APPEND_FIELDS = {"qa_history", "delta_changes", "streaming_events"}
+
+
+def _merge_state(state: GraphState, updates: dict) -> None:
+    """Merge a node's partial return into state, respecting append-style fields."""
+    for key, value in updates.items():
+        if key in _APPEND_FIELDS and isinstance(value, list):
+            state[key] = list(state.get(key) or []) + value
+        else:
+            state[key] = value
 
 
 def _now_iso() -> str:
@@ -114,27 +134,27 @@ def run_stage1_and_discovery(project_id: str) -> GraphState:
     """Run Stage-1 and Stage-2 until a question is ready or final doc is ready."""
     state = deepcopy(_PROJECT_STATES[project_id])
 
-    state.update(ingest_node(state))
+    _merge_state(state, ingest_node(state))
     _emit(state, "ingest_node", "node_completed", {})
 
-    state.update(raw_rag_index_node(state))
+    _merge_state(state, raw_rag_index_node(state))
     _emit(state, "raw_rag_index_node", "node_completed", {"chunks": len(state["working_chunk_ids"])})
 
-    state.update(score_node(state))
+    _merge_state(state, score_node(state))
     _emit(state, "score_node", "score_ready", {"weighted_total": state["score"]["weighted_total"]})
 
     if state["needs_enrichment"]:
-        state.update(enrich_node(state))
+        _merge_state(state, enrich_node(state))
         _emit(state, "enrich_node", "node_completed", {})
 
-    state.update(analyse_node(state))
+    _merge_state(state, analyse_node(state))
     _emit(state, "analyse_node", "analysis_ready", {"open_questions": len(state["analyser_output"]["open_questions"])})
 
-    state.update(prioritize_questions_node(state))
-    state.update(generate_question_node(state))
+    _merge_state(state, prioritize_questions_node(state))
+    _merge_state(state, generate_question_node(state))
 
     if state.get("current_question") is None:
-        state.update(finalize_doc_node(state))
+        _merge_state(state, finalize_doc_node(state))
         _emit(state, "finalize_doc_node", "document_ready", {})
     else:
         _emit(
@@ -165,15 +185,15 @@ def resume_discovery(
     if terminate:
         state["discovery_terminated"] = True
 
-    state.update(process_answer_node(state))
+    _merge_state(state, process_answer_node(state))
     _emit(state, "process_answer_node", "answer_processed", {"status": status})
 
     if not state["discovery_terminated"]:
-        state.update(prioritize_questions_node(state))
-        state.update(generate_question_node(state))
+        _merge_state(state, prioritize_questions_node(state))
+        _merge_state(state, generate_question_node(state))
 
     if state.get("current_question") is None or state["discovery_terminated"]:
-        state.update(finalize_doc_node(state))
+        _merge_state(state, finalize_doc_node(state))
         _emit(state, "finalize_doc_node", "document_ready", {})
     else:
         _emit(
@@ -189,13 +209,18 @@ def resume_discovery(
 def approve_and_export(project_id: str, user_edits_payload: dict | None = None) -> GraphState:
     """Finalize approved output, build approved index, and export artifacts."""
     state = deepcopy(_PROJECT_STATES[project_id])
-    state["review_2_status"] = "approved"
     state["user_edits_payload"] = user_edits_payload
 
-    state.update(approved_rag_index_node(state))
+    if user_edits_payload:
+        _merge_state(state, apply_review_2_edits_node(state))
+        _emit(state, "apply_review_2_edits_node", "edits_applied", {})
+    else:
+        state["review_2_status"] = "approved"
+
+    _merge_state(state, approved_rag_index_node(state))
     _emit(state, "approved_rag_index_node", "index_ready", {})
 
-    state.update(artifact_export_node(state))
+    _merge_state(state, artifact_export_node(state))
     _emit(
         state,
         "artifact_export_node",

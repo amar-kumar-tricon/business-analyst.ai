@@ -101,7 +101,7 @@ def enrich_node(state: AnalyserState) -> dict:
     }
 
     return {
-        "parsed_documents": [enrichment_doc],
+        "parsed_documents": list(state.get("parsed_documents") or []) + [enrichment_doc],
         "needs_enrichment": False,
         "delta_changes": delta_changes,
         "streaming_events": [stream_event],
