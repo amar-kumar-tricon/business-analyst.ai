@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import logging
 from collections import Counter
 
 from app.services.llm_gateway import call_structured_json
 from app.shared.state_types import AnalyserState
+
+
+log = logging.getLogger(__name__)
 
 
 CRITERION_NAMES = [
@@ -140,6 +144,7 @@ def score_node(state: AnalyserState) -> dict:
     2. Ask LLM for optional refined score JSON.
     3. Use LLM values only if valid; otherwise keep deterministic result.
     """
+    log.info("[score_node] START project_id=%s", state.get("project_id"))
     project_text = _collect_project_text(state)
 
     if not project_text.strip():
@@ -217,7 +222,12 @@ def score_node(state: AnalyserState) -> dict:
     except Exception:
         final_score = score
 
+    needs_enrichment = final_score["weighted_total"] <= 5.0
+    log.info(
+        "[score_node] DONE weighted_total=%.2f needs_enrichment=%s",
+        final_score["weighted_total"], needs_enrichment,
+    )
     return {
         "score": final_score,
-        "needs_enrichment": final_score["weighted_total"] <= 5.0,
+        "needs_enrichment": needs_enrichment,
     }

@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 
 from app.shared.state_types import DiscoveryState
+
+
+log = logging.getLogger(__name__)
 
 
 def _now_iso() -> str:
@@ -12,6 +16,12 @@ def _now_iso() -> str:
 def finalize_doc_node(state: DiscoveryState) -> dict:
     """Render analyser output and discovery decisions into final markdown."""
     ao = state["analyser_output"]
+    log.info(
+        "[finalize_doc] START qa_history=%d requirements=%d risks=%d",
+        len(state.get("qa_history", [])),
+        len(ao.get("functional_requirements", [])),
+        len(ao.get("risks", [])),
+    )
     now = _now_iso()
     weighted = ao.get("completeness_score", {}).get("weighted_total", 0.0)
     overview = ao.get("project_overview", {})
@@ -64,4 +74,5 @@ def finalize_doc_node(state: DiscoveryState) -> dict:
     ]
 
     markdown = "\n".join(lines)
+    log.info("[finalize_doc] DONE markdown_chars=%d", len(markdown))
     return {"final_doc_markdown": markdown}
