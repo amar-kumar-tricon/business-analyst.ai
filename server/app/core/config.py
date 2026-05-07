@@ -34,6 +34,7 @@ class Settings(BaseSettings):
 
     openai_api_key: str | None = None
     anthropic_api_key: str | None = None
+    groq_api_key: str | None = None
     default_model_provider: str = "openai"
     default_model_name: str = "gpt-4o-mini"
 

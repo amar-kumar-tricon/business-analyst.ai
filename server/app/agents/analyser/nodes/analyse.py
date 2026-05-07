@@ -118,19 +118,62 @@ def _build_open_questions(score: dict) -> list[dict]:
     return questions[:10]
 
 
+def _collect_full_text(state: AnalyserState) -> str:
+    """Collect all content — prioritises additional_context, then parsed docs."""
+    parts: list[str] = []
+    # Always include the original project context first
+    ctx = state.get("additional_context", "").strip()
+    if ctx:
+        parts.append(ctx)
+    # Then any non-enrichment sections from parsed docs
+    for doc in state.get("parsed_documents", []):
+        if doc.get("file_name") == "enrichment_notes.md":
+            continue
+        for section in doc.get("sections", []):
+            content = section.get("content", "").strip()
+            if content:
+                parts.append(content)
+    return "\n\n".join(parts)
+
+
 def analyse_node(state: AnalyserState) -> dict:
     """Build the Stage-1 analyser output JSON.
 
-    This function always returns valid output.
-    If LLM is configured, it can improve summary/team/open-questions.
+    When LLM is configured, uses it to extract requirements from the full text.
+    Otherwise falls back to keyword-based extraction.
     """
     score = state["score"]
+    full_text = _collect_full_text(state)
     lines = _collect_lines(state)
-    requirements = _build_functional_requirements(lines)
+
+    # ── Step 1: Try LLM extraction first ─────────────────────────────────────
+    llm_extract_prompt = (
+        "You are a Business Analyst. Extract ALL functional requirements from the text below.\n"
+        "Return STRICT JSON: {\"requirements\": [{\"req_id\": \"FR-001\", \"description\": \"...\", "
+        "\"moscow\": \"must_have|should_have|good_to_have\", "
+        "\"acceptance_hints\": [\"...\"]}]}\n"
+        "Extract every distinct feature/capability as a separate requirement. Aim for 10-30 items.\n\n"
+        f"TEXT:\n{full_text[:6000]}"
+    )
+    llm_reqs_result = call_structured_json(
+        llm_extract_prompt,
+        fallback={"requirements": []},
+    )
+    llm_reqs = llm_reqs_result.get("requirements", []) if isinstance(llm_reqs_result, dict) else []
+
+    # Validate shape — each item must have req_id and description
+    valid_llm_reqs = [
+        r for r in llm_reqs
+        if isinstance(r, dict) and r.get("req_id") and r.get("description")
+    ]
+
+    # ── Step 2: Fall back to keyword rules if LLM gave nothing ───────────────
+    requirements = valid_llm_reqs if valid_llm_reqs else _build_functional_requirements(lines)
+
     risks = _build_risks(score)
     questions = _build_open_questions(score)
-
     weighted = score.get("weighted_total", 0.0)
+
     analyser_output = {
         "executive_summary": (
             f"Analysis completed with weighted completeness score {weighted}/10. "
@@ -145,7 +188,7 @@ def analyse_node(state: AnalyserState) -> dict:
         "risks": risks,
         "recommended_team": {
             "roles": ["Business Analyst", "Tech Lead", "QA Engineer"],
-            "size": max(3, min(8, len(requirements) // 2 + 2)),
+            "size": max(3, min(10, len(requirements) // 3 + 2)),
             "rationale": "Team size scales with requirement volume and risk profile.",
         },
         "open_questions": questions,
@@ -159,19 +202,6 @@ def analyse_node(state: AnalyserState) -> dict:
         ],
     }
 
-    llm_prompt = (
-        "Improve this analysis output while keeping schema identical. "
-        "Return strict JSON with keys executive_summary,project_overview,"
-        "functional_requirements,risks,recommended_team,open_questions,"
-        "completeness_score,assumptions_made.\n"
-        f"Current output: {analyser_output}"
-    )
-    improved = call_structured_json(llm_prompt, fallback=analyser_output)
-    if isinstance(improved, dict):
-        # Safety: keep deterministic completeness score and only accept dict shape.
-        improved["completeness_score"] = score
-        analyser_output = {**analyser_output, **improved}
-
     return {
         "analyser_output": analyser_output,
         "streaming_events": [
@@ -183,6 +213,7 @@ def analyse_node(state: AnalyserState) -> dict:
                     "requirements": len(requirements),
                     "risks": len(risks),
                     "open_questions": len(questions),
+                    "used_llm_extraction": bool(valid_llm_reqs),
                 },
                 "timestamp": _now_iso(),
             }
