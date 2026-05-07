@@ -9,6 +9,7 @@ Chroma's bundled default model (runs locally, no API needed).
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from hashlib import sha1
 from typing import Any
@@ -20,18 +21,53 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from app.core.config import settings
 
 
+log = logging.getLogger(__name__)
+
 CHUNK_SIZE = 800
 CHUNK_OVERLAP = 150
 DEFAULT_TOP_K = 5
 
 
 # ---------------------------------------------------------------------------
-# Chroma client + embedding function (singletons)
+# Chroma client + embedding function (lazy singletons)
 # ---------------------------------------------------------------------------
 
 _CHROMA_DIR = settings.export_dir / "chroma"
-_CHROMA_DIR.mkdir(parents=True, exist_ok=True)
-_client = chromadb.PersistentClient(path=str(_CHROMA_DIR))
+_client: chromadb.api.client.Client | None = None
+
+
+def _get_client():
+    """Lazily create the persistent Chroma client.
+
+    Lazy init keeps module import cheap and lets us recover from a corrupted
+    on-disk state (e.g. after uvicorn `--reload` killed the previous worker
+    mid-write) by deleting the directory and rebuilding.
+    """
+    global _client
+    if _client is not None:
+        return _client
+    _CHROMA_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        _client = chromadb.PersistentClient(path=str(_CHROMA_DIR))
+    except Exception as e:
+        log.warning("[rag] chroma init failed (%s) — wiping %s and retrying", e, _CHROMA_DIR)
+        import shutil
+
+        shutil.rmtree(_CHROMA_DIR, ignore_errors=True)
+        _CHROMA_DIR.mkdir(parents=True, exist_ok=True)
+        _client = chromadb.PersistentClient(path=str(_CHROMA_DIR))
+    return _client
+
+
+def _reset_client_after_corruption() -> None:
+    """Drop the in-memory client + wipe the on-disk dir; next call rebuilds."""
+    global _client
+    log.warning("[rag] resetting corrupted chroma state at %s", _CHROMA_DIR)
+    _client = None
+    import shutil
+
+    shutil.rmtree(_CHROMA_DIR, ignore_errors=True)
+    _CHROMA_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _embedding_function():
@@ -57,11 +93,19 @@ def _collection_name(project_id: str, version: int, kind: str) -> str:
 
 
 def _reset_collection(name: str):
+    client = _get_client()
     try:
-        _client.delete_collection(name)
+        client.delete_collection(name)
     except Exception:
         pass
-    return _client.create_collection(name=name, embedding_function=_embedding_function())
+    try:
+        return client.create_collection(name=name, embedding_function=_embedding_function())
+    except chromadb.errors.InternalError as e:
+        # Common cause: uvicorn --reload killed the previous worker mid-write,
+        # leaving SQLite in a half-locked / readonly state. Wipe and retry once.
+        log.warning("[rag] create_collection failed (%s) — recovering", e)
+        _reset_client_after_corruption()
+        return _get_client().create_collection(name=name, embedding_function=_embedding_function())
 
 
 _splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(
@@ -89,6 +133,7 @@ def build_working_index(
     parsed_documents: list[dict],
 ) -> tuple[list[str], str]:
     """Chunk parsed sections and add them to a fresh Chroma collection."""
+    log.info("[rag] build_working_index START project_id=%s parsed_docs=%d", project_id, len(parsed_documents))
     name = _collection_name(project_id, version, "working")
     collection = _reset_collection(name)
 
@@ -115,6 +160,7 @@ def build_working_index(
     if ids:
         collection.add(ids=ids, documents=documents, metadatas=metadatas)
 
+    log.info("[rag] build_working_index DONE collection=%s chunks=%d", name, len(ids))
     return ids, name
 
 
@@ -124,6 +170,7 @@ def build_approved_index(
     analyser_output: dict,
 ) -> tuple[list[str], str]:
     """Build a permanent collection from approved requirements + risks."""
+    log.info("[rag] build_approved_index START project_id=%s", project_id)
     name = _collection_name(project_id, version, "approved")
     collection = _reset_collection(name)
 
@@ -159,6 +206,7 @@ def build_approved_index(
     if ids:
         collection.add(ids=ids, documents=documents, metadatas=metadatas)
 
+    log.info("[rag] build_approved_index DONE collection=%s records=%d", name, len(ids))
     return ids, name
 
 
@@ -186,13 +234,16 @@ def retrieve(
     """Top-k similar chunks from the project's Chroma collection."""
     query = (query or "").strip()
     if not query:
+        log.info("[rag] retrieve SKIP empty query")
         return []
     name = _collection_name(project_id, version, kind)
     try:
-        collection = _client.get_collection(name=name, embedding_function=_embedding_function())
-    except Exception:
+        collection = _get_client().get_collection(name=name, embedding_function=_embedding_function())
+    except Exception as e:
+        log.warning("[rag] retrieve collection %s missing: %s", name, e)
         return []
 
+    log.info("[rag] retrieve START collection=%s k=%d query_chars=%d", name, k, len(query))
     result = collection.query(query_texts=[query], n_results=k)
     ids = (result.get("ids") or [[]])[0]
     docs = (result.get("documents") or [[]])[0]
@@ -212,4 +263,5 @@ def retrieve(
                 metadata=meta,
             )
         )
+    log.info("[rag] retrieve DONE returned=%d", len(out))
     return out

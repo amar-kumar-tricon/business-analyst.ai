@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import logging
 from copy import deepcopy
 
 from app.services.llm_gateway import call_structured_json
 from app.shared.state_types import DiscoveryState
+
+
+log = logging.getLogger(__name__)
 
 
 PRIORITY_ORDER = {"high": 0, "medium": 1, "low": 2}
@@ -22,8 +26,10 @@ def prioritize_questions_node(state: DiscoveryState) -> dict:
     We first do deterministic sorting, then ask LLM for optional re-ordering.
     """
     open_questions = state["analyser_output"].get("open_questions", [])
+    log.info("[prioritize] START open_questions=%d", len(open_questions))
 
     if not open_questions:
+        log.info("[prioritize] DONE nothing to prioritise")
         return {}
 
     updated = deepcopy(state["analyser_output"])
@@ -49,4 +55,6 @@ def prioritize_questions_node(state: DiscoveryState) -> dict:
             key=lambda q: (rank_map.get(q.get("question_id", ""), 999), _rank_question(q)),
         )
 
+    top = updated["open_questions"][0]["question_id"] if updated["open_questions"] else None
+    log.info("[prioritize] DONE top_qid=%s", top)
     return {"analyser_output": updated}

@@ -4,8 +4,10 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from app.core.config import settings
 from app.db.models import Project, ProjectArtifact, ProjectIndexEntry
 from app.db.session import SessionLocal
 from app.services.parser import parse_file
@@ -242,3 +244,25 @@ async def get_project_events(project_id: str) -> dict:
         "project_id": project_id,
         "events": event_bus.backlog(project_id),
     }
+
+
+_ARTIFACT_MIMES = {
+    "md": "text/markdown",
+    "pdf": "application/pdf",
+    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
+
+
+@projects_router.get("/{project_id}/artifacts/{kind}")
+async def download_artifact(project_id: str, kind: Literal["md", "pdf", "docx"]) -> FileResponse:
+    """Stream a finalised artifact (md/pdf/docx) for download."""
+    state = get_project_state(project_id)
+    version = (state or {}).get("version", 1)
+    path = settings.export_dir / "artifacts" / f"{project_id}_v{version}.{kind}"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"{kind} artifact not found")
+    return FileResponse(
+        path=path,
+        media_type=_ARTIFACT_MIMES[kind],
+        filename=f"{project_id}_v{version}.{kind}",
+    )

@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 from app.core.config import settings
+
+
+log = logging.getLogger(__name__)
 
 
 def _safe_json_parse(text: str) -> dict[str, Any] | None:
@@ -19,27 +23,38 @@ def call_structured_json(prompt: str, fallback: dict[str, Any]) -> dict[str, Any
 
     This keeps local development stable even when API keys are missing.
     """
-    # We keep imports inside the function so tests do not fail when provider libs are missing.
-    if settings.default_model_provider == "openai" and settings.openai_api_key:
+    provider = settings.default_model_provider
+    model_name = settings.default_model_name
+
+    if provider == "openai" and settings.openai_api_key:
         try:
             from langchain_openai import ChatOpenAI
 
-            model = ChatOpenAI(model=settings.default_model_name, api_key=settings.openai_api_key, temperature=0)
+            log.info("[llm] call_structured_json provider=openai model=%s prompt_chars=%d", model_name, len(prompt))
+            model = ChatOpenAI(model=model_name, api_key=settings.openai_api_key, temperature=0)
             message = model.invoke(prompt)
             parsed = _safe_json_parse(str(message.content))
-            return parsed if isinstance(parsed, dict) else fallback
-        except Exception:
+            ok = isinstance(parsed, dict)
+            log.info("[llm] response provider=openai parsed_ok=%s response_chars=%d", ok, len(str(message.content)))
+            return parsed if ok else fallback
+        except Exception as e:
+            log.warning("[llm] openai call failed: %s — using fallback", e)
             return fallback
 
-    if settings.default_model_provider == "anthropic" and settings.anthropic_api_key:
+    if provider == "anthropic" and settings.anthropic_api_key:
         try:
             from langchain_anthropic import ChatAnthropic
 
-            model = ChatAnthropic(model=settings.default_model_name, api_key=settings.anthropic_api_key, temperature=0)
+            log.info("[llm] call_structured_json provider=anthropic model=%s prompt_chars=%d", model_name, len(prompt))
+            model = ChatAnthropic(model=model_name, api_key=settings.anthropic_api_key, temperature=0)
             message = model.invoke(prompt)
             parsed = _safe_json_parse(str(message.content))
-            return parsed if isinstance(parsed, dict) else fallback
-        except Exception:
+            ok = isinstance(parsed, dict)
+            log.info("[llm] response provider=anthropic parsed_ok=%s response_chars=%d", ok, len(str(message.content)))
+            return parsed if ok else fallback
+        except Exception as e:
+            log.warning("[llm] anthropic call failed: %s — using fallback", e)
             return fallback
 
+    log.info("[llm] no usable provider configured (provider=%s) — using fallback", provider)
     return fallback

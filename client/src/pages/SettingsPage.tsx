@@ -1,25 +1,17 @@
 /**
- * SettingsPage — Admin LLM configuration per agent.
+ * SettingsPage — placeholder.
  *
- * TODO:
- *  - Fetch current per-agent LLM config from GET /settings/llm-config.
- *  - Render a row per agent with provider + model_name + temperature + max_tokens.
- *  - PUT updates to /settings/llm-config/{agent_id}.
+ * Per-agent LLM configuration is not yet exposed by the backend.
  */
-import { useEffect, useState } from "react";
-import { settingsApi } from "../api/settings";
-
 export default function SettingsPage() {
-  const [config, setConfig] = useState<any[]>([]);
-
-  useEffect(() => {
-    settingsApi.getLlmConfig().then(setConfig);
-  }, []);
-
   return (
-    <section className="card">
-      <h2>Settings — Per-Agent LLM Configuration</h2>
-      <pre>{JSON.stringify(config, null, 2)}</pre>
+    <section className="rounded-lg border border-border bg-card p-6">
+      <h2 className="text-xl font-semibold">Settings</h2>
+      <p className="mt-2 text-sm text-muted-foreground">
+        LLM provider and model are configured via the server <code>.env</code> file
+        (<code>OPENAI_API_KEY</code>, <code>DEFAULT_MODEL_NAME</code>). A UI for
+        per-agent overrides will land in a later phase.
+      </p>
     </section>
   );
 }

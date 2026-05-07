@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -22,6 +23,8 @@ from app.agents.graph import (
 from app.shared.event_bus import event_bus
 from app.shared.state_types import GraphState, ParsedDocument, ParsedSection, StreamEvent
 
+
+log = logging.getLogger(__name__)
 
 _PROJECT_STATES: dict[str, GraphState] = {}
 
@@ -103,6 +106,7 @@ def init_project_state(project_id: str, name: str, additional_context: str = "")
 
     _PROJECT_STATES[project_id] = state
     _emit(state, "bootstrap", "project_created", {"name": name})
+    log.info("[workflow] project_created project_id=%s name=%r", project_id, name)
     return deepcopy(state)
 
 
@@ -126,13 +130,19 @@ def append_parsed_document(project_id: str, parsed_document: ParsedDocument, raw
     state = deepcopy(_PROJECT_STATES[project_id])
     state["parsed_documents"] = state.get("parsed_documents", []) + [parsed_document]
     state["raw_files"] = state.get("raw_files", []) + [raw_file_name]
+    sections = len(parsed_document.get("sections", []))
     _emit(state, "upload", "file_parsed", {"file_name": raw_file_name})
+    log.info(
+        "[workflow] file_parsed project_id=%s file=%r sections=%d total_docs=%d",
+        project_id, raw_file_name, sections, len(state["parsed_documents"]),
+    )
     return _save(state)
 
 
 def run_stage1_and_discovery(project_id: str) -> GraphState:
     """Run Stage-1 and Stage-2 until a question is ready or final doc is ready."""
     state = deepcopy(_PROJECT_STATES[project_id])
+    log.info("[workflow] run_stage1_and_discovery START project_id=%s docs=%d", project_id, len(state.get("parsed_documents", [])))
 
     _merge_state(state, ingest_node(state))
     _emit(state, "ingest_node", "node_completed", {})
@@ -142,6 +152,7 @@ def run_stage1_and_discovery(project_id: str) -> GraphState:
 
     _merge_state(state, score_node(state))
     _emit(state, "score_node", "score_ready", {"weighted_total": state["score"]["weighted_total"]})
+    log.info("[workflow] stage1 score=%s needs_enrichment=%s", state["score"]["weighted_total"], state["needs_enrichment"])
 
     if state["needs_enrichment"]:
         _merge_state(state, enrich_node(state))
@@ -149,6 +160,12 @@ def run_stage1_and_discovery(project_id: str) -> GraphState:
 
     _merge_state(state, analyse_node(state))
     _emit(state, "analyse_node", "analysis_ready", {"open_questions": len(state["analyser_output"]["open_questions"])})
+    log.info(
+        "[workflow] stage1 done — requirements=%d risks=%d open_questions=%d",
+        len(state["analyser_output"].get("functional_requirements", [])),
+        len(state["analyser_output"].get("risks", [])),
+        len(state["analyser_output"].get("open_questions", [])),
+    )
 
     _merge_state(state, prioritize_questions_node(state))
     _merge_state(state, generate_question_node(state))
@@ -156,6 +173,7 @@ def run_stage1_and_discovery(project_id: str) -> GraphState:
     if state.get("current_question") is None:
         _merge_state(state, finalize_doc_node(state))
         _emit(state, "finalize_doc_node", "document_ready", {})
+        log.info("[workflow] stage2 finalised immediately (no questions to ask)")
     else:
         _emit(
             state,
@@ -163,7 +181,9 @@ def run_stage1_and_discovery(project_id: str) -> GraphState:
             "question_ready",
             {"question_id": state["current_question"]["question_id"]},
         )
+        log.info("[workflow] stage2 awaiting answer qid=%s", state["current_question"]["question_id"])
 
+    log.info("[workflow] run_stage1_and_discovery END project_id=%s", project_id)
     return _save(state)
 
 
@@ -176,6 +196,11 @@ def resume_discovery(
 ) -> GraphState:
     """Resume Stage-2 after user answers a discovery question."""
     state = deepcopy(_PROJECT_STATES[project_id])
+    qid = state.get("current_question", {}).get("question_id") if state.get("current_question") else None
+    log.info(
+        "[workflow] resume_discovery project_id=%s qid=%s status=%s terminate=%s",
+        project_id, qid, status, terminate,
+    )
 
     if state.get("current_question") is not None:
         state["current_question"]["answer"] = answer
@@ -195,12 +220,17 @@ def resume_discovery(
     if state.get("current_question") is None or state["discovery_terminated"]:
         _merge_state(state, finalize_doc_node(state))
         _emit(state, "finalize_doc_node", "document_ready", {})
+        log.info("[workflow] discovery finalised — qa_history=%d", len(state.get("qa_history", [])))
     else:
         _emit(
             state,
             "generate_question_node",
             "question_ready",
             {"question_id": state["current_question"]["question_id"]},
+        )
+        log.info(
+            "[workflow] next question ready qid=%s asked_count=%d",
+            state["current_question"]["question_id"], state["questions_asked_count"],
         )
 
     return _save(state)
@@ -210,6 +240,7 @@ def approve_and_export(project_id: str, user_edits_payload: dict | None = None) 
     """Finalize approved output, build approved index, and export artifacts."""
     state = deepcopy(_PROJECT_STATES[project_id])
     state["user_edits_payload"] = user_edits_payload
+    log.info("[workflow] approve_and_export project_id=%s has_edits=%s", project_id, bool(user_edits_payload))
 
     if user_edits_payload:
         _merge_state(state, apply_review_2_edits_node(state))
@@ -229,6 +260,12 @@ def approve_and_export(project_id: str, user_edits_payload: dict | None = None) 
             "pdf": state.get("final_doc_pdf_s3_key"),
             "docx": state.get("final_doc_docx_s3_key"),
         },
+    )
+    log.info(
+        "[workflow] artifacts_exported project_id=%s pdf=%s docx=%s",
+        project_id,
+        state.get("final_doc_pdf_s3_key"),
+        state.get("final_doc_docx_s3_key"),
     )
 
     return _save(state)

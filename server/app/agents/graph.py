@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime, timezone
 
@@ -12,6 +13,9 @@ from app.services.rag import build_approved_index, build_working_index
 from app.shared.state_types import GraphState
 
 
+log = logging.getLogger(__name__)
+
+
 def _now_iso() -> str:
     """Return current UTC time in ISO format."""
     return datetime.now(timezone.utc).isoformat()
@@ -19,6 +23,7 @@ def _now_iso() -> str:
 
 def ingest_node(state: GraphState) -> dict:
     """Prepare minimal parsed document structure before analysis starts."""
+    log.info("[ingest_node] START project_id=%s parsed_docs=%d", state.get("project_id"), len(state.get("parsed_documents", [])))
     updates: dict = {}
 
     if not state.get("parsed_documents"):
@@ -48,16 +53,19 @@ def ingest_node(state: GraphState) -> dict:
     if state.get("review_2_status") is None:
         updates["review_2_status"] = "pending"
 
+    log.info("[ingest_node] DONE updates_keys=%s", sorted(updates.keys()))
     return updates
 
 
 def raw_rag_index_node(state: GraphState) -> dict:
     """Chunk + embed parsed sections into the working RAG index."""
+    log.info("[raw_rag_index_node] START project_id=%s version=%s", state["project_id"], state["version"])
     chunk_ids, index_path = build_working_index(
         project_id=state["project_id"],
         version=state["version"],
         parsed_documents=state.get("parsed_documents", []),
     )
+    log.info("[raw_rag_index_node] DONE chunks=%d collection=%s", len(chunk_ids), index_path)
 
     return {
         "working_chunk_ids": chunk_ids,
@@ -78,9 +86,11 @@ def raw_rag_index_node(state: GraphState) -> dict:
 
 def apply_review_1_edits_node(state: GraphState) -> dict:
     """Apply review-1 human edits from payload into analyser output."""
+    log.info("[apply_review_1_edits_node] START")
     payload = state.get("user_edits_payload") or {}
     analyser = state.get("analyser_output")
     if not analyser:
+        log.info("[apply_review_1_edits_node] DONE no analyser_output to edit; auto-approving")
         return {"review_1_status": "approved"}
 
     deltas = []
@@ -99,6 +109,7 @@ def apply_review_1_edits_node(state: GraphState) -> dict:
         )
         analyser = {**analyser, "executive_summary": summary.strip()}
 
+    log.info("[apply_review_1_edits_node] DONE deltas=%d", len(deltas))
     return {
         "analyser_output": analyser,
         "review_1_status": "approved",
@@ -114,13 +125,16 @@ def route_review_2_node(state: GraphState) -> dict:
 
 def apply_review_2_edits_node(state: GraphState) -> dict:
     """Apply final human markdown edits before artifact export."""
+    log.info("[apply_review_2_edits_node] START")
     payload = state.get("user_edits_payload") or {}
     appendix = payload.get("final_doc_appendix")
     markdown = state.get("final_doc_markdown") or ""
     if not isinstance(appendix, str) or not appendix.strip():
+        log.info("[apply_review_2_edits_node] DONE no appendix; auto-approving")
         return {"review_2_status": "approved"}
 
     updated_markdown = f"{markdown}\n\n## Review Notes\n\n{appendix.strip()}\n"
+    log.info("[apply_review_2_edits_node] DONE appendix_added chars=%d", len(appendix.strip()))
     return {
         "final_doc_markdown": updated_markdown,
         "review_2_status": "approved",
@@ -140,11 +154,13 @@ def apply_review_2_edits_node(state: GraphState) -> dict:
 
 def approved_rag_index_node(state: GraphState) -> dict:
     """Build a permanent index over approved requirements + risks."""
+    log.info("[approved_rag_index_node] START project_id=%s", state["project_id"])
     chunk_ids, index_path = build_approved_index(
         project_id=state["project_id"],
         version=state["version"],
         analyser_output=state.get("analyser_output") or {},
     )
+    log.info("[approved_rag_index_node] DONE records=%d collection=%s", len(chunk_ids), index_path)
 
     return {
         "streaming_events": [
@@ -164,8 +180,10 @@ def artifact_export_node(state: GraphState) -> dict:
 
     We try real generation first, then fallback to text placeholders.
     """
+    log.info("[artifact_export_node] START project_id=%s version=%s", state["project_id"], state["version"])
     markdown = state.get("final_doc_markdown") or "# Business Requirements Analysis\n\n_No content available._\n"
     md_key = save_artifact(state["project_id"], state["version"], "md", markdown)
+    log.info("[artifact_export_node] md_saved key=%s", md_key)
 
     pdf_content: bytes | str
     try:
@@ -190,6 +208,7 @@ def artifact_export_node(state: GraphState) -> dict:
 
     pdf_key = save_artifact(state["project_id"], state["version"], "pdf", pdf_content)
     docx_key = save_artifact(state["project_id"], state["version"], "docx", docx_content)
+    log.info("[artifact_export_node] DONE pdf=%s docx=%s", pdf_key, docx_key)
 
     return {
         "final_doc_markdown": markdown,

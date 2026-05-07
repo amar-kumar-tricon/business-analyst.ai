@@ -3,36 +3,59 @@
  * Keep function names aligned 1:1 with backend routes for easy navigation.
  */
 import { http } from "./http";
-import type { Project, StageName } from "../types";
+import type {
+  AnswerResponse,
+  AnswerStatus,
+  ApproveResponse,
+  CreateProjectResponse,
+  RunResponse,
+  UploadFileResponse,
+} from "../types";
+
+const apiBase = (import.meta.env.VITE_API_BASE_URL ?? "/api").replace(/\/$/, "");
 
 export const projectsApi = {
-  create: (name: string) => http.post<Project>("/projects", { name }).then((r) => r.data),
-  get: (id: string) => http.get<Project>(`/projects/${id}`).then((r) => r.data),
+  create: (name: string, additional_context = "") =>
+    http
+      .post<CreateProjectResponse>("/projects", { name, additional_context })
+      .then((r) => r.data),
 
-  uploadDocuments: (id: string, files: File[], additionalContext = "") => {
+  uploadFile: (id: string, file: File) => {
     const form = new FormData();
-    files.forEach((f) => form.append("files", f));
-    form.append("additional_context", additionalContext);
-    return http.post(`/projects/${id}/documents`, form, {
-      headers: { "Content-Type": "multipart/form-data" },
-    });
+    form.append("file", file);
+    return http
+      .post<UploadFileResponse>(`/projects/${id}/files`, form, {
+        headers: { "Content-Type": "multipart/form-data" },
+      })
+      .then((r) => r.data);
   },
 
-  triggerAnalyse: (id: string) => http.post(`/projects/${id}/analyse`),
-  approveStage: (id: string, stage: StageName, edits?: unknown) =>
-    http.post(`/projects/${id}/approve/${stage}`, { edits }),
+  run: (id: string) =>
+    http.post<RunResponse>(`/projects/${id}/run`).then((r) => r.data),
 
-  getDiscovery: (id: string) => http.get(`/projects/${id}/discovery`).then((r) => r.data),
-  answerDiscovery: (id: string, answer: string, status = "answered") =>
-    http.post(`/projects/${id}/discovery/answer`, { answer, status }),
+  answer: (
+    id: string,
+    args: {
+      answer: string | null;
+      status: AnswerStatus;
+      selected_option_index: number | null;
+      terminate: boolean;
+    }
+  ) =>
+    http
+      .post<AnswerResponse>(`/projects/${id}/discovery/answer`, args)
+      .then((r) => r.data),
 
-  getArchitecture: (id: string) => http.get(`/projects/${id}/architecture`).then((r) => r.data),
-  regenerateArchitecture: (id: string) => http.post(`/projects/${id}/architecture/regenerate`),
+  approve: (id: string, user_edits_payload: Record<string, unknown> | null = null) =>
+    http
+      .post<ApproveResponse>(`/projects/${id}/approve`, { user_edits_payload })
+      .then((r) => r.data),
 
-  getSprint: (id: string) => http.get(`/projects/${id}/sprint`).then((r) => r.data),
-  finalize: (id: string) => http.post(`/projects/${id}/finalize`),
-  listVersions: (id: string) => http.get(`/projects/${id}/versions`).then((r) => r.data),
+  artifactUrl: (id: string, kind: "md" | "pdf" | "docx") =>
+    `${apiBase}/projects/${id}/artifacts/${kind}`,
 
-  export: (id: string, stage: StageName, format: "pdf" | "docx") =>
-    http.post(`/projects/${id}/export`, { stage, format }, { responseType: "blob" }),
+  events: (id: string) =>
+    http
+      .get<{ project_id: string; events: unknown[] }>(`/projects/${id}/events`)
+      .then((r) => r.data),
 };
