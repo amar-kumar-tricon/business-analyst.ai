@@ -1,7 +1,7 @@
 /**
  * Global app store (Zustand). Holds the active project, the latest analysis
- * snapshot, the Stage-2 conversation, and the final document so every page
- * reads from one source of truth.
+ * snapshot, the Stage-2 conversation, the final document, and async-run flags
+ * so every page reads from one source of truth.
  */
 import { create } from "zustand";
 import type {
@@ -25,11 +25,18 @@ interface AppState {
   finalDocReady: boolean;
   events: BackendEvent[];
 
+  // Async-run flags
+  isRunning: boolean;
+  runError: string | null;
+
   setProject: (id: string, name: string) => void;
+  setRunning: (running: boolean) => void;
+  setRunError: (err: string | null) => void;
   applyRun: (r: RunResponse) => void;
   applyAnswer: (r: AnswerResponse, sentQA: QAExchange | null) => void;
   applyApprove: (r: ApproveResponse) => void;
   appendEvent: (e: BackendEvent) => void;
+  resetEvents: () => void;
   reset: () => void;
 }
 
@@ -43,12 +50,16 @@ const initial = {
   finalDocMarkdown: null,
   finalDocReady: false,
   events: [] as BackendEvent[],
+  isRunning: false,
+  runError: null as string | null,
 };
 
 export const useAppStore = create<AppState>((set) => ({
   ...initial,
 
   setProject: (id, name) => set({ projectId: id, projectName: name }),
+  setRunning: (running) => set({ isRunning: running }),
+  setRunError: (err) => set({ runError: err }),
 
   applyRun: (r) =>
     set({
@@ -56,6 +67,8 @@ export const useAppStore = create<AppState>((set) => ({
       currentQuestion: r.current_question,
       finalDocMarkdown: r.final_doc_markdown,
       finalDocReady: !!r.final_doc_markdown,
+      isRunning: false,
+      runError: null,
     }),
 
   applyAnswer: (r, sentQA) =>
@@ -64,11 +77,14 @@ export const useAppStore = create<AppState>((set) => ({
       currentQuestion: r.current_question,
       finalDocMarkdown: r.final_doc_markdown,
       finalDocReady: !!r.final_doc_markdown,
+      isRunning: false,
+      runError: null,
     })),
 
-  applyApprove: (_r) => set({ finalDocReady: true }),
+  applyApprove: (_r) => set({ finalDocReady: true, isRunning: false }),
 
   appendEvent: (e) => set((s) => ({ events: [...s.events, e] })),
+  resetEvents: () => set({ events: [] }),
 
   reset: () => set({ ...initial }),
 }));

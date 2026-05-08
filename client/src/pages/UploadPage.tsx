@@ -2,19 +2,17 @@
  * UploadPage — Stage 0.
  *
  * Flow on submit:
- *   1. POST /projects                    — create the project shell
+ *   1. POST /projects                       — create the project shell
  *   2. POST /projects/{id}/files (per file) — upload + parse each document
- *   3. POST /projects/{id}/run           — run Stage 1 + Stage 2 (until first question)
- *   4. Navigate to /discovery (if a question came back) or /approve (otherwise)
+ *   3. Fire POST /projects/{id}/run         — DON'T await; navigate to /analyser
+ *      so the user sees live progress while the long LLM pipeline runs.
+ *      The promise resolves into the store (applyRun / setRunError).
  *
- * Backend parser currently understands .md / .markdown / .txt / .csv / .json.
- * Other file types are accepted by the input but will be best-effort plain-text.
+ * Backend supports .md / .markdown / .txt / .csv / .json / .pdf / .docx.
  */
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { projectsApi } from "../api/projects";
-import { openProjectStream } from "../api/ws";
-import { formatEventSummary } from "../lib/events";
 import { useAppStore } from "../store/useAppStore";
 
 const ACCEPTED = ".md,.markdown,.txt,.csv,.json,.pdf,.docx";
@@ -27,19 +25,13 @@ export default function UploadPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [statusLine, setStatusLine] = useState<string>("");
-  const [liveEvents, setLiveEvents] = useState<string[]>([]);
-  const wsRef = useRef<WebSocket | null>(null);
+
   const setProject = useAppStore((s) => s.setProject);
   const applyRun = useAppStore((s) => s.applyRun);
+  const setRunning = useAppStore((s) => s.setRunning);
+  const setRunError = useAppStore((s) => s.setRunError);
   const reset = useAppStore((s) => s.reset);
   const nav = useNavigate();
-
-  useEffect(() => {
-    return () => {
-      wsRef.current?.close();
-      wsRef.current = null;
-    };
-  }, []);
 
   async function handleStart() {
     setError(null);
@@ -47,34 +39,33 @@ export default function UploadPage() {
     if (files.length === 0) return setError("Upload at least one document.");
 
     setBusy(true);
-    setLiveEvents([]);
     reset();
     try {
       setStatusLine("Creating project…");
       const created = await projectsApi.create(name.trim(), context);
       setProject(created.project_id, name.trim());
 
-      // Open WS so the user sees node-by-node progress while /run is in flight.
-      wsRef.current?.close();
-      wsRef.current = openProjectStream(created.project_id, (e) => {
-        setLiveEvents((prev) => [...prev, formatEventSummary(e)]);
-      });
-
       for (const file of files) {
         setStatusLine(`Uploading & parsing ${file.name}…`);
         await projectsApi.uploadFile(created.project_id, file);
       }
 
-      setStatusLine("Running Stage 1 + Stage 2 — this can take a couple of minutes for large BRDs.");
-      const run = await projectsApi.run(created.project_id);
-      applyRun(run);
+      // Kick off the long-running Stage 1 + 2 pipeline. Don't await — the
+      // analyser page will show live progress and pick up the result via the
+      // store as soon as the promise resolves.
+      setRunning(true);
+      projectsApi
+        .run(created.project_id)
+        .then((r) => applyRun(r))
+        .catch((e: any) => {
+          setRunError(e?.response?.data?.detail ?? e?.message ?? "Run failed.");
+          setRunning(false);
+        });
 
-      nav(run.current_question ? "/discovery" : "/approve");
+      nav("/analyser");
     } catch (e: any) {
       setError(e?.response?.data?.detail ?? e.message ?? "Something went wrong.");
     } finally {
-      wsRef.current?.close();
-      wsRef.current = null;
       setBusy(false);
       setStatusLine("");
     }
@@ -149,23 +140,9 @@ export default function UploadPage() {
           </div>
         )}
 
-        {busy && (
-          <div className="rounded-md border border-border bg-muted/40 p-3">
-            {statusLine && (
-              <p className="mb-2 flex items-center gap-2 text-sm font-medium text-foreground">
-                <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-primary" />
-                {statusLine}
-              </p>
-            )}
-            {liveEvents.length > 0 ? (
-              <ul className="max-h-48 space-y-0.5 overflow-y-auto font-mono text-xs text-muted-foreground">
-                {liveEvents.map((line, i) => (
-                  <li key={i}>· {line}</li>
-                ))}
-              </ul>
-            ) : (
-              <p className="text-xs text-muted-foreground">Waiting for first event…</p>
-            )}
+        {busy && statusLine && (
+          <div className="rounded-md border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
+            {statusLine}
           </div>
         )}
 
