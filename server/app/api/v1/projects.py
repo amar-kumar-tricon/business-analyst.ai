@@ -143,7 +143,7 @@ async def upload_project_file(project_id: str, file: UploadFile = File(...)) -> 
 
 
 @projects_router.post("/{project_id}/run")
-async def run_project(project_id: str) -> dict:
+def run_project(project_id: str) -> dict:
     """Run Stage-1 and Stage-2 flow for a project."""
     state = get_project_state(project_id)
     if state is None:
@@ -175,7 +175,7 @@ async def run_project(project_id: str) -> dict:
 
 
 @projects_router.post("/{project_id}/discovery/answer")
-async def answer_discovery(project_id: str, payload: AnswerRequest) -> dict:
+def answer_discovery(project_id: str, payload: AnswerRequest) -> dict:
     """Resume discovery after user answers a question."""
     state = get_project_state(project_id)
     if state is None:
@@ -199,7 +199,7 @@ async def answer_discovery(project_id: str, payload: AnswerRequest) -> dict:
 
 
 @projects_router.post("/{project_id}/approve")
-async def approve_project(project_id: str, payload: ApproveRequest) -> dict:
+def approve_project(project_id: str, payload: ApproveRequest) -> dict:
     """Approve project output and generate final artifacts."""
     state = get_project_state(project_id)
     if state is None:
