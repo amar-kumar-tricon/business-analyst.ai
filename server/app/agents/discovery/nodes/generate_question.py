@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 
 from app.services.llm_gateway import call_structured_json
 from app.shared.state_types import DiscoveryState, QAExchange
+
+
+log = logging.getLogger(__name__)
 
 
 def _now_iso() -> str:
@@ -13,7 +17,12 @@ def _now_iso() -> str:
 
 def generate_question_node(state: DiscoveryState) -> dict:
     """Pick one unanswered question and build answer options for the user."""
+    log.info(
+        "[generate_question] START asked_count=%d history=%d",
+        state["questions_asked_count"], len(state["qa_history"]),
+    )
     if state["questions_asked_count"] >= 10:
+        log.info("[generate_question] DONE hit hard cap (10), terminating")
         return {"current_question": None}
 
     already_asked = {qa["question_id"] for qa in state["qa_history"]}
@@ -23,6 +32,7 @@ def generate_question_node(state: DiscoveryState) -> dict:
     ]
 
     if not unanswered:
+        log.info("[generate_question] DONE no unanswered questions left")
         return {"current_question": None}
 
     next_q = unanswered[0]
@@ -65,6 +75,10 @@ def generate_question_node(state: DiscoveryState) -> dict:
         "triggered_changes": [],
     }
 
+    log.info(
+        "[generate_question] DONE qid=%s options=%d",
+        current_question["question_id"], len(current_question["options"]),
+    )
     return {
         "current_question": current_question,
         "questions_asked_count": state["questions_asked_count"] + 1,

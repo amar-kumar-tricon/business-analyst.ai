@@ -1,10 +1,22 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime, timezone
 
 from app.services.llm_gateway import call_structured_json
+from app.services.rag import retrieve
 from app.shared.state_types import AnalyserState
+
+
+log = logging.getLogger(__name__)
+
+
+GROUNDING_QUERY = (
+    "key functional requirements, business rules, risks, target users, "
+    "non-functional constraints, integrations, timelines"
+)
+GROUNDING_TOP_K = 8
 
 
 def _now_iso() -> str:
@@ -118,30 +130,13 @@ def _build_open_questions(score: dict) -> list[dict]:
     return questions[:10]
 
 
-def _collect_full_text(state: AnalyserState) -> str:
-    """Collect all content — prioritises additional_context, then parsed docs."""
-    parts: list[str] = []
-    # Always include the original project context first
-    ctx = state.get("additional_context", "").strip()
-    if ctx:
-        parts.append(ctx)
-    # Then any non-enrichment sections from parsed docs
-    for doc in state.get("parsed_documents", []):
-        if doc.get("file_name") == "enrichment_notes.md":
-            continue
-        for section in doc.get("sections", []):
-            content = section.get("content", "").strip()
-            if content:
-                parts.append(content)
-    return "\n\n".join(parts)
-
-
 def analyse_node(state: AnalyserState) -> dict:
     """Build the Stage-1 analyser output JSON.
 
     When LLM is configured, uses it to extract requirements from the full text.
     Otherwise falls back to keyword-based extraction.
     """
+    log.info("[analyse_node] START project_id=%s", state.get("project_id"))
     score = state["score"]
     full_text = _collect_full_text(state)
     lines = _collect_lines(state)
@@ -172,8 +167,12 @@ def analyse_node(state: AnalyserState) -> dict:
 
     risks = _build_risks(score)
     questions = _build_open_questions(score)
-    weighted = score.get("weighted_total", 0.0)
+    log.info(
+        "[analyse_node] baseline built lines=%d requirements=%d risks=%d open_questions=%d",
+        len(lines), len(requirements), len(risks), len(questions),
+    )
 
+    weighted = score.get("weighted_total", 0.0)
     analyser_output = {
         "executive_summary": (
             f"Analysis completed with weighted completeness score {weighted}/10. "
@@ -188,7 +187,7 @@ def analyse_node(state: AnalyserState) -> dict:
         "risks": risks,
         "recommended_team": {
             "roles": ["Business Analyst", "Tech Lead", "QA Engineer"],
-            "size": max(3, min(10, len(requirements) // 3 + 2)),
+            "size": max(3, min(8, len(requirements) // 2 + 2)),
             "rationale": "Team size scales with requirement volume and risk profile.",
         },
         "open_questions": questions,
@@ -202,6 +201,39 @@ def analyse_node(state: AnalyserState) -> dict:
         ],
     }
 
+    grounding = retrieve(
+        project_id=state["project_id"],
+        version=state.get("version", 1),
+        kind="working",
+        query=GROUNDING_QUERY,
+        k=GROUNDING_TOP_K,
+    )
+    log.info("[analyse_node] retrieved %d grounding chunks", len(grounding))
+    grounding_block = "\n\n".join(
+        f"[{i+1}] ({c.section_heading or 'Untitled'} — {c.file_name or 'unknown'})\n{c.content}"
+        for i, c in enumerate(grounding)
+    )
+
+    llm_prompt = (
+        "Improve this analysis output while keeping schema identical. "
+        "Return strict JSON with keys executive_summary,project_overview,"
+        "functional_requirements,risks,recommended_team,open_questions,"
+        "completeness_score,assumptions_made.\n"
+        f"Grounding chunks (most relevant first):\n{grounding_block or '(no chunks)'}\n\n"
+        f"Current output: {analyser_output}"
+    )
+    improved = call_structured_json(llm_prompt, fallback=analyser_output)
+    if isinstance(improved, dict):
+        # Safety: keep deterministic completeness score and only accept dict shape.
+        improved["completeness_score"] = score
+        analyser_output = {**analyser_output, **improved}
+
+    log.info(
+        "[analyse_node] DONE final requirements=%d risks=%d open_questions=%d",
+        len(analyser_output.get("functional_requirements", [])),
+        len(analyser_output.get("risks", [])),
+        len(analyser_output.get("open_questions", [])),
+    )
     return {
         "analyser_output": analyser_output,
         "streaming_events": [

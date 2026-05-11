@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 from app.core.config import settings
+
+
+log = logging.getLogger(__name__)
 
 
 def _safe_json_parse(text: str) -> dict[str, Any] | None:
@@ -47,17 +51,6 @@ def call_structured_json(prompt: str, fallback: dict[str, Any]) -> dict[str, Any
             from langchain_anthropic import ChatAnthropic
 
             model = ChatAnthropic(model=settings.default_model_name, api_key=settings.anthropic_api_key, temperature=0)
-            message = model.invoke(prompt)
-            parsed = _safe_json_parse(str(message.content))
-            return parsed if isinstance(parsed, dict) else fallback
-        except Exception:
-            return fallback
-
-    if settings.default_model_provider == "groq" and settings.groq_api_key:
-        try:
-            from langchain_groq import ChatGroq
-
-            model = ChatGroq(model=settings.default_model_name, api_key=settings.groq_api_key, temperature=0)
             message = model.invoke(prompt)
             parsed = _safe_json_parse(str(message.content))
             return parsed if isinstance(parsed, dict) else fallback

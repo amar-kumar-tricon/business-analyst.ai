@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from copy import deepcopy
 from datetime import datetime, timezone
 
 from app.services.llm_gateway import call_structured_json
 from app.shared.state_types import DeltaChange, DiscoveryState
+
+
+log = logging.getLogger(__name__)
 
 
 def _now_iso() -> str:
@@ -18,7 +22,9 @@ def process_answer_node(state: DiscoveryState) -> dict:
     qa = state.get("current_question")
     if qa is None:
         # Defensive: nothing to process.
+        log.info("[process_answer] SKIP no current_question")
         return {}
+    log.info("[process_answer] START qid=%s status=%s", qa["question_id"], qa.get("status"))
 
     new_analyser = deepcopy(state["analyser_output"])
     new_deltas: list[DeltaChange] = []
@@ -87,6 +93,12 @@ def process_answer_node(state: DiscoveryState) -> dict:
 
     qa["triggered_changes"] = []
 
+    log.info(
+        "[process_answer] DONE qid=%s requirements_now=%d deltas_added=%d",
+        qa["question_id"],
+        len(new_analyser.get("functional_requirements", [])),
+        len(new_deltas),
+    )
     return {
         "analyser_output": new_analyser,
         "qa_history": [qa],          # appended via Annotated[list, add] reducer
