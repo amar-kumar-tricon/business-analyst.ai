@@ -15,16 +15,10 @@ from app.agents.discovery.nodes.prioritize import prioritize_questions_node
 from app.agents.discovery.nodes.process_answer import process_answer_node
 from app.agents.graph import (
     apply_review_2_edits_node,
-    artifact_export_node,
-    approved_rag_index_node,
-    ingest_node,
-    raw_rag_index_node,
-)
-from app.agents.graph import (
-    artifact_export_node,
-    approved_rag_index_node,
     apply_review_3_edits_node,
     apply_review_4_edits_node,
+    approved_rag_index_node,
+    artifact_export_node,
     ingest_node,
     mock_architecture_node,
     raw_rag_index_node,
@@ -224,3 +218,74 @@ def approve_and_export(project_id: str, user_edits_payload: dict | None = None) 
     )
 
     return _save(state)
+
+
+# ──────────────────────────────────────────────
+# Stage 3 — Architecture workflow helpers
+# ──────────────────────────────────────────────
+
+def run_architecture_stage(project_id: str) -> GraphState:
+    """Run the mock Architecture Agent (Stage 3) and persist state."""
+    state = deepcopy(_PROJECT_STATES[project_id])
+
+    state.update(mock_architecture_node(state))
+    _emit(state, "mock_architecture_node", "architecture_generated", {
+        "diagram_count": len((state.get("architecture_output") or {}).get("diagrams", [])),
+        "is_mocked": True,
+    })
+
+    return _save(state)
+
+
+def approve_architecture(project_id: str, user_edits_payload: dict | None = None) -> GraphState:
+    """Approve Stage-3 architecture output and advance to Sprint stage."""
+    state = deepcopy(_PROJECT_STATES[project_id])
+    state["user_edits_payload"] = user_edits_payload
+
+    state.update(apply_review_3_edits_node(state))
+    _emit(state, "apply_review_3_edits_node", "architecture_approved", {})
+
+    return _save(state)
+
+
+# ──────────────────────────────────────────────
+# Stage 4 — Sprint Planning workflow helpers
+# ──────────────────────────────────────────────
+
+def run_sprint_stage(project_id: str) -> GraphState:
+    """Run the Sprint Planning Agent (Stage 4) and persist state."""
+    state = deepcopy(_PROJECT_STATES[project_id])
+
+    state.update(generate_plan_node(state))
+    plan = state.get("sprint_plan") or {}
+    _emit(state, "generate_plan_node", "sprint_plan_ready", {
+        "total_sprints": plan.get("total_sprints"),
+        "total_story_points": plan.get("total_story_points"),
+        "mvp_cutoff_sprint": plan.get("mvp_cutoff_sprint"),
+    })
+
+    return _save(state)
+
+
+def approve_sprint(project_id: str, user_edits_payload: dict | None = None) -> GraphState:
+    """Approve Stage-4 sprint plan, export final artifacts."""
+    state = deepcopy(_PROJECT_STATES[project_id])
+    state["user_edits_payload"] = user_edits_payload
+
+    state.update(apply_review_4_edits_node(state))
+    _emit(state, "apply_review_4_edits_node", "sprint_approved", {})
+
+    # Export final artifacts
+    state.update(artifact_export_node(state))
+    _emit(
+        state,
+        "artifact_export_node",
+        "artifacts_ready",
+        {
+            "pdf": state.get("final_doc_pdf_s3_key"),
+            "docx": state.get("final_doc_docx_s3_key"),
+        },
+    )
+
+    return _save(state)
+

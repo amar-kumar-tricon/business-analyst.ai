@@ -4,8 +4,10 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from app.core.config import settings
 from app.db.models import Project, ProjectArtifact, ProjectIndexEntry
 from app.db.session import SessionLocal
 from app.services.parser import parse_file
@@ -14,9 +16,13 @@ from app.services.storage import upload_local_file
 from app.services.workflow import (
     append_parsed_document,
     approve_and_export,
+    approve_architecture,
+    approve_sprint,
     get_project_state,
     init_project_state,
     resume_discovery,
+    run_architecture_stage,
+    run_sprint_stage,
     run_stage1_and_discovery,
 )
 from app.shared.event_bus import event_bus
@@ -82,6 +88,11 @@ class AnswerRequest(BaseModel):
 
 
 class ApproveRequest(BaseModel):
+    user_edits_payload: dict | None = None
+
+
+class SprintApproveRequest(BaseModel):
+    sprint_notes: str | None = None
     user_edits_payload: dict | None = None
 
 
