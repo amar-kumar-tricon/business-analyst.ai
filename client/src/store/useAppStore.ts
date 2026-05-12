@@ -1,16 +1,19 @@
 /**
- * Global app store (Zustand). Holds the active project id and cached stage outputs
- * so every page can read from a single source of truth.
+ * Global app store (Zustand). Holds the active project id and run result.
  */
-import { create } from "zustand";
-import type { Project } from "../types";
+import {create} from 'zustand';
+
+interface ProjectState {
+    id: string;
+    runResult?: any;
+}
 
 interface AppState {
-  project: Project | null;
-  setProject: (p: Project | null) => void;
+    project: ProjectState | null;
+    setProject: (p: ProjectState | null) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
-  project: null,
-  setProject: (project) => set({ project }),
+    project: null,
+    setProject: (project) => set({project}),
 }));
