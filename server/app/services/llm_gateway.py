@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from app.core.config import settings
 
 
 def _safe_json_parse(text: str) -> dict[str, Any] | None:
-    """Try to parse JSON text; return None if parsing fails."""
+    """Try to parse JSON text; strips markdown fences before parsing."""
     try:
-        return json.loads(text)
+        clean = re.sub(r"```[a-zA-Z]*\n?", "", text).strip()
+        return json.loads(clean)
     except Exception:
         return None
 

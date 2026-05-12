@@ -164,8 +164,14 @@ def _build_prompt(functional_requirements: list[dict], recommended_team: dict) -
     frs_json  = json.dumps(functional_requirements, indent=2)
     team_json = json.dumps(recommended_team, indent=2)
     return f"""You are a senior agile delivery consultant.
-Using StoryDecomposerTool, StoryPointerTool, MVPClassifierTool, TeamSizerTool, and SprintAllocatorTool,
-generate a complete sprint plan from the inputs below.
+
+Given the functional requirements and recommended team below, generate a complete sprint plan.
+
+Rules:
+- Decide the number of sprints based on scope: small projects (<=5 FRs) = 2-3 sprints, medium (6-15 FRs) = 4-6 sprints, large (>15 FRs) = 7-10 sprints.
+- Each sprint is 2 weeks. Set mvp_cutoff_sprint to roughly 70% of total sprints (round down, min 1).
+- Derive team composition, technology stack, and risks from the actual requirements — do NOT use generic placeholders.
+- Every functional requirement must map to at least one user story.
 
 FUNCTIONAL REQUIREMENTS:
 {frs_json}
@@ -175,11 +181,11 @@ RECOMMENDED TEAM:
 
 Return ONLY a valid JSON object with this structure:
 {{
-  "total_sprints": 6,
+  "total_sprints": <int>,
   "sprint_duration_weeks": 2,
   "total_story_points": <int>,
   "total_man_hours": <int>,
-  "mvp_cutoff_sprint": 4,
+  "mvp_cutoff_sprint": <int>,
   "team_composition": [{{"role": <str>, "count": <int>, "hours_per_sprint": <int>}}],
   "technology_stack": [{{"component": <str>, "technology": <str>, "rationale": <str>}}],
   "sprints": [
@@ -199,6 +205,8 @@ Return ONLY a valid JSON object with this structure:
   ],
   "generated_at": "<ISO timestamp>"
 }}
+
+Do NOT wrap the output in markdown code fences. Return raw JSON only.
 """
 
 
