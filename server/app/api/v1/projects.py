@@ -4,8 +4,10 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from app.core.config import settings
 from app.db.models import Project, ProjectArtifact, ProjectIndexEntry
 from app.db.session import SessionLocal
 from app.services.parser import parse_file
@@ -142,7 +144,7 @@ async def upload_project_file(project_id: str, file: UploadFile = File(...)) -> 
 
 
 @projects_router.post("/{project_id}/run")
-async def run_project(project_id: str) -> dict:
+def run_project(project_id: str) -> dict:
     """Run Stage-1 and Stage-2 flow for a project."""
     state = get_project_state(project_id)
     if state is None:
@@ -174,7 +176,7 @@ async def run_project(project_id: str) -> dict:
 
 
 @projects_router.post("/{project_id}/discovery/answer")
-async def answer_discovery(project_id: str, payload: AnswerRequest) -> dict:
+def answer_discovery(project_id: str, payload: AnswerRequest) -> dict:
     """Resume discovery after user answers a question."""
     state = get_project_state(project_id)
     if state is None:
@@ -198,7 +200,7 @@ async def answer_discovery(project_id: str, payload: AnswerRequest) -> dict:
 
 
 @projects_router.post("/{project_id}/approve")
-async def approve_project(project_id: str, payload: ApproveRequest) -> dict:
+def approve_project(project_id: str, payload: ApproveRequest) -> dict:
     """Approve project output and generate final artifacts."""
     state = get_project_state(project_id)
     if state is None:
@@ -259,3 +261,25 @@ async def get_project_events(project_id: str) -> dict:
         "project_id": project_id,
         "events": event_bus.backlog(project_id),
     }
+
+
+_ARTIFACT_MIMES = {
+    "md": "text/markdown",
+    "pdf": "application/pdf",
+    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
+
+
+@projects_router.get("/{project_id}/artifacts/{kind}")
+async def download_artifact(project_id: str, kind: Literal["md", "pdf", "docx"]) -> FileResponse:
+    """Stream a finalised artifact (md/pdf/docx) for download."""
+    state = get_project_state(project_id)
+    version = (state or {}).get("version", 1)
+    path = settings.export_dir / "artifacts" / f"{project_id}_v{version}.{kind}"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"{kind} artifact not found")
+    return FileResponse(
+        path=path,
+        media_type=_ARTIFACT_MIMES[kind],
+        filename=f"{project_id}_v{version}.{kind}",
+    )

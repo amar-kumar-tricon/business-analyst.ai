@@ -1,10 +1,22 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime, timezone
 
 from app.services.llm_gateway import call_structured_json
+from app.services.rag import retrieve
 from app.shared.state_types import AnalyserState
+
+
+log = logging.getLogger(__name__)
+
+
+GROUNDING_QUERY = (
+    "key functional requirements, business rules, risks, target users, "
+    "non-functional constraints, integrations, timelines"
+)
+GROUNDING_TOP_K = 8
 
 
 def _now_iso() -> str:
@@ -124,11 +136,16 @@ def analyse_node(state: AnalyserState) -> dict:
     This function always returns valid output.
     If LLM is configured, it can improve summary/team/open-questions.
     """
+    log.info("[analyse_node] START project_id=%s", state.get("project_id"))
     score = state["score"]
     lines = _collect_lines(state)
     requirements = _build_functional_requirements(lines)
     risks = _build_risks(score)
     questions = _build_open_questions(score)
+    log.info(
+        "[analyse_node] baseline built lines=%d requirements=%d risks=%d open_questions=%d",
+        len(lines), len(requirements), len(risks), len(questions),
+    )
 
     weighted = score.get("weighted_total", 0.0)
     analyser_output = {
@@ -159,11 +176,25 @@ def analyse_node(state: AnalyserState) -> dict:
         ],
     }
 
+    grounding = retrieve(
+        project_id=state["project_id"],
+        version=state.get("version", 1),
+        kind="working",
+        query=GROUNDING_QUERY,
+        k=GROUNDING_TOP_K,
+    )
+    log.info("[analyse_node] retrieved %d grounding chunks", len(grounding))
+    grounding_block = "\n\n".join(
+        f"[{i+1}] ({c.section_heading or 'Untitled'} — {c.file_name or 'unknown'})\n{c.content}"
+        for i, c in enumerate(grounding)
+    )
+
     llm_prompt = (
         "Improve this analysis output while keeping schema identical. "
         "Return strict JSON with keys executive_summary,project_overview,"
         "functional_requirements,risks,recommended_team,open_questions,"
         "completeness_score,assumptions_made.\n"
+        f"Grounding chunks (most relevant first):\n{grounding_block or '(no chunks)'}\n\n"
         f"Current output: {analyser_output}"
     )
     improved = call_structured_json(llm_prompt, fallback=analyser_output)
@@ -172,6 +203,12 @@ def analyse_node(state: AnalyserState) -> dict:
         improved["completeness_score"] = score
         analyser_output = {**analyser_output, **improved}
 
+    log.info(
+        "[analyse_node] DONE final requirements=%d risks=%d open_questions=%d",
+        len(analyser_output.get("functional_requirements", [])),
+        len(analyser_output.get("risks", [])),
+        len(analyser_output.get("open_questions", [])),
+    )
     return {
         "analyser_output": analyser_output,
         "streaming_events": [

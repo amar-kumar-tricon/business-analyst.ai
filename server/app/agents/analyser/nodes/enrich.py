@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime, timezone
 
 from app.services.llm_gateway import call_structured_json
 from app.shared.state_types import AnalyserState
+
+
+log = logging.getLogger(__name__)
 
 
 def _now_iso() -> str:
@@ -29,8 +33,10 @@ def enrich_node(state: AnalyserState) -> dict:
 
     We first create deterministic hints, then optionally let LLM refine them.
     """
+    log.info("[enrich_node] START project_id=%s", state.get("project_id"))
     score = state.get("score")
     if score is None:
+        log.info("[enrich_node] SKIP no score in state")
         return {}
 
     low_criteria = [
@@ -38,8 +44,10 @@ def enrich_node(state: AnalyserState) -> dict:
         for criterion in CRITERION_HINTS
         if score.get(criterion, 0.0) < 0.67
     ]
+    log.info("[enrich_node] low_criteria=%s", low_criteria)
 
     if not low_criteria:
+        log.info("[enrich_node] DONE no enrichment needed")
         return {"needs_enrichment": False}
 
     enrichment_sections = []
@@ -100,8 +108,12 @@ def enrich_node(state: AnalyserState) -> dict:
         "timestamp": _now_iso(),
     }
 
+    log.info(
+        "[enrich_node] DONE enriched=%d criteria added_doc=enrichment_notes.md",
+        len(enrichment_sections),
+    )
     return {
-        "parsed_documents": [enrichment_doc],
+        "parsed_documents": list(state.get("parsed_documents") or []) + [enrichment_doc],
         "needs_enrichment": False,
         "delta_changes": delta_changes,
         "streaming_events": [stream_event],

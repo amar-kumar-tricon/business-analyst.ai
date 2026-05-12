@@ -1,16 +1,17 @@
 /**
- * Lightweight wrapper around the `/ws/projects/{id}/stream` WebSocket endpoint.
- * Dispatches typed events to subscribers. See server/app/api/v1/websocket.py.
+ * Wrapper around the `/ws/projects/{id}/events` WebSocket endpoint.
+ * Backend at server/app/api/v1/websocket.py replays the backlog on connect
+ * then streams new events as they happen.
  */
-export type StreamEvent =
-  | { type: "token"; payload: string }
-  | { type: "stage_complete"; payload: { stage: string } }
-  | { type: "question"; payload: { question: string } }
-  | { type: "error"; payload: { message: string } };
+import type { BackendEvent } from "../types";
 
-export function openProjectStream(projectId: string, onEvent: (e: StreamEvent) => void) {
-  const base = import.meta.env.VITE_WS_BASE_URL ?? "/ws";
-  const url = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}${base}/projects/${projectId}/stream`;
+export function openProjectStream(
+  projectId: string,
+  onEvent: (e: BackendEvent) => void
+): WebSocket {
+  const base = (import.meta.env.VITE_WS_BASE_URL ?? "/ws").replace(/\/$/, "");
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const url = `${proto}://${location.host}${base}/projects/${projectId}/events`;
   const ws = new WebSocket(url);
   ws.onmessage = (ev) => {
     try {
