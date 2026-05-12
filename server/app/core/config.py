@@ -34,8 +34,9 @@ class Settings(BaseSettings):
 
     openai_api_key: str | None = None
     anthropic_api_key: str | None = None
-    default_model_provider: str = "openai"
-    default_model_name: str = "gpt-4o-mini"
+    groq_api_key: str | None = None
+    default_model_provider: str = "groq"
+    default_model_name: str = "llama-3.3-70b-versatile"
 
     upload_dir: Path = Path("./uploads")
     export_dir: Path = Path("./exports")

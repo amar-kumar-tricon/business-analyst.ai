@@ -17,6 +17,7 @@ from app.services.workflow import (
     get_project_state,
     init_project_state,
     resume_discovery,
+    run_sprint_planning,
     run_stage1_and_discovery,
 )
 from app.shared.event_bus import event_bus
@@ -220,6 +221,22 @@ async def approve_project(project_id: str, payload: ApproveRequest) -> dict:
         "status": "approved",
         "final_doc_pdf_s3_key": updated.get("final_doc_pdf_s3_key"),
         "final_doc_docx_s3_key": updated.get("final_doc_docx_s3_key"),
+    }
+
+
+@projects_router.post("/{project_id}/sprint")
+async def generate_sprint_plan(project_id: str) -> dict:
+    """Generate a sprint plan from the project's analyser output and persist it."""
+    try:
+        updated = run_sprint_planning(project_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    save_state_snapshot(project_id, updated)
+
+    return {
+        "project_id": project_id,
+        "sprint_plan": updated.get("sprint_plan"),
     }
 
 

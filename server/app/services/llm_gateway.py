@@ -42,4 +42,15 @@ def call_structured_json(prompt: str, fallback: dict[str, Any]) -> dict[str, Any
         except Exception:
             return fallback
 
+    if settings.default_model_provider == "groq" and settings.groq_api_key:
+        try:
+            from langchain_groq import ChatGroq
+
+            model = ChatGroq(model=settings.default_model_name, api_key=settings.groq_api_key, temperature=0)
+            message = model.invoke(prompt)
+            parsed = _safe_json_parse(str(message.content))
+            return parsed if isinstance(parsed, dict) else fallback
+        except Exception:
+            return fallback
+
     return fallback

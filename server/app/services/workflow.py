@@ -13,6 +13,7 @@ from app.agents.discovery.nodes.generate_question import generate_question_node
 from app.agents.discovery.nodes.prioritize import prioritize_questions_node
 from app.agents.discovery.nodes.process_answer import process_answer_node
 from app.agents.graph import artifact_export_node, approved_rag_index_node, ingest_node, raw_rag_index_node
+from app.agents.sprint.nodes.plan import sprint_plan_node
 from app.shared.event_bus import event_bus
 from app.shared.state_types import GraphState, ParsedDocument, ParsedSection, StreamEvent
 
@@ -76,6 +77,7 @@ def init_project_state(project_id: str, name: str, additional_context: str = "")
         "review_1_status": "approved",
         "review_2_status": "pending",
         "user_edits_payload": None,
+        "sprint_plan": None,
         "delta_changes": [],
         "streaming_events": [],
         "llm_config": {},
@@ -205,5 +207,31 @@ def approve_and_export(project_id: str, user_edits_payload: dict | None = None) 
             "docx": state.get("final_doc_docx_s3_key"),
         },
     )
+
+    return _save(state)
+
+
+def run_sprint_planning(project_id: str) -> GraphState:
+    """Run the sprint planning node and persist the result into state."""
+    # Prefer in-memory runtime state; fall back to persisted snapshot
+    state = _PROJECT_STATES.get(project_id)
+    if state is None:
+        from app.services.persistence import load_state_snapshot
+
+        persisted = load_state_snapshot(project_id)
+        if persisted is None:
+            raise ValueError(f"No state found for project {project_id}")
+        # Load snapshot into runtime so subsequent calls can use it
+        _PROJECT_STATES[project_id] = persisted
+        state = persisted
+
+    state = deepcopy(state)
+
+    if state.get("analyser_output") is None:
+        raise ValueError("analyser_output is missing — run POST /run first to generate it.")
+
+    updates = sprint_plan_node(state)
+    state.update(updates)
+    _emit(state, "sprint_plan_node", "sprint_plan_ready", {"total_sprints": state["sprint_plan"]["total_sprints"]})
 
     return _save(state)

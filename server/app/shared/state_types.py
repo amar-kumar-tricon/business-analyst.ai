@@ -68,6 +68,61 @@ class AnalyserResult(TypedDict):
     assumptions_made: list[dict]
 
 
+class UserStory(TypedDict):
+    story_id: str
+    title: str
+    description: str
+    acceptance_criteria: list[str]
+    story_points: int
+    role: str
+    req_id: str
+
+
+class Sprint(TypedDict):
+    sprint_number: int
+    sprint_name: str
+    goal: str
+    features: list[str]
+    stories: list[UserStory]
+    total_points: int
+    man_hours: int
+    is_mvp_cutoff: bool
+
+
+class TeamMember(TypedDict):
+    role: str
+    count: int
+    hours_per_sprint: int
+
+
+class TechStackItem(TypedDict):
+    component: str
+    technology: str
+    rationale: str
+
+
+class SprintRisk(TypedDict):
+    risk_id: str
+    description: str
+    category: str
+    severity: str
+    mitigation: str
+    sprint_impacted: int | None
+
+
+class SprintPlan(TypedDict):
+    total_sprints: int
+    sprint_duration_weeks: int
+    total_story_points: int
+    total_man_hours: int
+    mvp_cutoff_sprint: int
+    team_composition: list[TeamMember]
+    technology_stack: list[TechStackItem]
+    sprints: list[Sprint]
+    risk_register: list[SprintRisk]
+    generated_at: str
+
+
 class QAExchange(TypedDict):
     question_id: str
     question: str
@@ -125,6 +180,8 @@ class GraphState(TypedDict):
     review_1_status: Literal["pending", "edits_made", "approved"]
     review_2_status: Literal["pending", "edits_made", "more_questions", "approved"]
     user_edits_payload: dict | None
+
+    sprint_plan: SprintPlan | None
 
     delta_changes: Annotated[list[DeltaChange], add]
     streaming_events: Annotated[list[StreamEvent], add]
