@@ -1,22 +1,16 @@
 /**
- * SprintPage — Stage 4 (placeholder).
- * TODO: Implement once sprint endpoint is wired.
+ * SprintPage — Stage 4 stub.
+ *
+ * Stage 4 (Sprint planning) is not implemented in the current backend.
  */
-import {useAppStore} from '../store/useAppStore';
-
 export default function SprintPage() {
-    const project = useAppStore((s) => s.project);
-
-    if (!project)
-        return <p className='text-muted-foreground'>No active project.</p>;
-
-    return (
-        <section className='mx-auto max-w-4xl space-y-4'>
-            <h2 className='text-xl font-semibold'>Stage 4 — Sprint Plan</h2>
-            <p className='text-muted-foreground'>
-                Sprint planning is not yet implemented. Complete Stages 1–3
-                first.
-            </p>
-        </section>
-    );
+  return (
+    <section className="rounded-lg border border-border bg-card p-6">
+      <h2 className="text-xl font-semibold">Stage 4 — Sprint Planner</h2>
+      <p className="mt-2 text-sm text-muted-foreground">
+        Not implemented yet. Stage 4 will produce a sprint breakdown with story
+        points and team composition.
+      </p>
+    </section>
+  );
 }

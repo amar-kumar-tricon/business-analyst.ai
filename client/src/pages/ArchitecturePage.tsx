@@ -1,123 +1,185 @@
 import mermaid from 'mermaid';
 /**
- * ArchitecturePage — Stage 3.
- * Renders Mermaid diagrams in-browser and PlantUML DSL as code blocks.
+ * ArchitecturePage — Stage 3 architecture diagrams.
+ *
+ * Calls POST /projects/{id}/architecture then renders the returned
+ * Mermaid + PlantUML diagrams with explanations. Mermaid diagrams are
+ * rendered to SVG client-side; PlantUML shows the raw DSL.
  */
 import {useCallback, useEffect, useRef, useState} from 'react';
+import {Link} from 'react-router-dom';
 
 import {projectsApi} from '../api/projects';
 import {useAppStore} from '../store/useAppStore';
 
-mermaid.initialize({startOnLoad: false, theme: 'dark'});
+import type {DiagramEntry} from '../types';
 
-interface Diagram {
-    title: string;
-    type: string;
-    dsl: string;
-}
+mermaid.initialize({startOnLoad: false, theme: 'dark', securityLevel: 'loose'});
 
-function MermaidDiagram({dsl, title}: {dsl: string; title: string}) {
+function MermaidDiagram({dsl, id}: {dsl: string; id: string}) {
     const ref = useRef<HTMLDivElement>(null);
-    const [svg, setSvg] = useState<string>('');
-    const [error, setError] = useState<string>('');
-
-    const render = useCallback(async () => {
-        if (!dsl) return;
-        try {
-            const id = `mermaid-${title.replace(/\s+/g, '-')}-${Date.now()}`;
-            const {svg: rendered} = await mermaid.render(id, dsl);
-            setSvg(rendered);
-            setError('');
-        } catch (e: any) {
-            setError(e.message || 'Failed to render');
-        }
-    }, [dsl, title]);
+    const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
-        render();
-    }, [render]);
+        let cancelled = false;
+        (async () => {
+            try {
+                const {svg} = await mermaid.render(`mermaid-${id}`, dsl);
+                if (!cancelled && ref.current) ref.current.innerHTML = svg;
+            } catch (e: any) {
+                if (!cancelled)
+                    setError(e?.message ?? 'Failed to render diagram');
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [dsl, id]);
 
     if (error) {
         return (
-            <div className='rounded border border-destructive/50 bg-destructive/10 p-3'>
-                <p className='mb-2 text-xs text-destructive'>
+            <div className='space-y-2'>
+                <p className='text-xs text-destructive'>
                     Render error: {error}
                 </p>
-                <pre className='text-xs text-muted-foreground'>{dsl}</pre>
+                <pre className='max-h-60 overflow-auto rounded border border-border bg-muted p-3 text-xs'>
+                    {dsl}
+                </pre>
             </div>
         );
     }
 
+    return <div ref={ref} className='overflow-auto' />;
+}
+
+function DiagramCard({
+    entry,
+    idx,
+    type,
+}: {
+    entry: DiagramEntry;
+    idx: number;
+    type: 'mermaid' | 'plantuml';
+}) {
+    const [showCode, setShowCode] = useState(false);
+
     return (
-        <div
-            ref={ref}
-            className='overflow-auto rounded bg-muted/50 p-4'
-            dangerouslySetInnerHTML={{__html: svg}}
-        />
+        <article className='rounded-lg border border-border bg-card p-5 space-y-3'>
+            <div className='flex items-baseline justify-between gap-2'>
+                <h3 className='text-base font-semibold'>{entry.title}</h3>
+                <span className='shrink-0 rounded bg-muted px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground'>
+                    {type}
+                </span>
+            </div>
+
+            {entry.explanation && (
+                <p className='text-sm text-muted-foreground'>
+                    {entry.explanation}
+                </p>
+            )}
+
+            {type === 'mermaid' ? (
+                <MermaidDiagram dsl={entry.dsl} id={`${type}-${idx}`} />
+            ) : (
+                <pre className='max-h-72 overflow-auto rounded border border-border bg-muted p-3 text-xs'>
+                    {entry.dsl}
+                </pre>
+            )}
+
+            <button
+                onClick={() => setShowCode(!showCode)}
+                className='text-xs text-muted-foreground underline hover:text-foreground'
+            >
+                {showCode ? 'Hide code' : 'Show code'}
+            </button>
+            {showCode && type === 'mermaid' && (
+                <pre className='max-h-60 overflow-auto rounded border border-border bg-muted p-3 text-xs'>
+                    {entry.dsl}
+                </pre>
+            )}
+        </article>
     );
 }
 
 export default function ArchitecturePage() {
-    const project = useAppStore((s) => s.project);
-    const [mermaidDiagrams, setMermaidDiagrams] = useState<Diagram[]>([]);
-    const [plantumlDiagrams, setPlantumlDiagrams] = useState<Diagram[]>([]);
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState('');
-    const [generated, setGenerated] = useState(false);
+    const {projectId, projectName, architectureOutput} = useAppStore();
+    const applyArchitecture = useAppStore((s) => s.applyArchitecture);
+    const setRunning = useAppStore((s) => s.setRunning);
+    const setRunError = useAppStore((s) => s.setRunError);
 
-    useEffect(() => {
-        if (!project?.id) return;
-        // Check if architecture already exists
-        projectsApi.get(project.id).then((res: any) => {
-            const arch = res.state?.architecture_output;
-            if (arch) {
-                setMermaidDiagrams(arch.mermaid ?? []);
-                setPlantumlDiagrams(arch.plantuml ?? []);
-                setGenerated(true);
-            }
-        });
-    }, [project]);
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState<string | null>(null);
 
-    async function handleGenerate() {
-        if (!project?.id) return;
-        setLoading(true);
-        setError('');
+    const handleGenerate = useCallback(async () => {
+        if (!projectId) return;
+        setError(null);
+        setBusy(true);
+        setRunning(true);
         try {
-            const res = await projectsApi.runArchitecture(project.id);
-            const arch = res.architecture_output;
-            setMermaidDiagrams(arch?.mermaid ?? []);
-            setPlantumlDiagrams(arch?.plantuml ?? []);
-            setGenerated(true);
+            const r = await projectsApi.runArchitecture(projectId);
+            applyArchitecture(r);
         } catch (e: any) {
-            setError(
-                e?.response?.data?.detail || e.message || 'Failed to generate',
-            );
+            const msg =
+                e?.response?.data?.detail ??
+                e?.message ??
+                'Architecture generation failed.';
+            setError(msg);
+            setRunError(msg);
+            setRunning(false);
         } finally {
-            setLoading(false);
+            setBusy(false);
         }
+    }, [projectId, applyArchitecture, setRunning, setRunError]);
+
+    if (!projectId) {
+        return (
+            <div className='rounded-md border border-border bg-card p-6 text-sm'>
+                No active project — start from the{' '}
+                <Link to='/' className='text-primary underline'>
+                    upload page
+                </Link>
+                .
+            </div>
+        );
     }
 
-    if (!project)
-        return <p className='text-muted-foreground'>No active project.</p>;
+    const mermaidDiagrams = architectureOutput?.mermaid ?? [];
+    const plantumlDiagrams = architectureOutput?.plantuml ?? [];
+    const hasDiagrams =
+        mermaidDiagrams.length > 0 || plantumlDiagrams.length > 0;
 
     return (
-        <section className='mx-auto max-w-5xl space-y-6'>
-            <div className='flex items-center justify-between'>
-                <h2 className='text-xl font-semibold'>
-                    Stage 3 — Architecture Diagrams
-                </h2>
-                <button
-                    onClick={handleGenerate}
-                    disabled={loading}
-                    className='rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50'
-                >
-                    {loading
-                        ? 'Generating…'
-                        : generated
-                          ? 'Regenerate'
-                          : 'Generate Diagrams'}
-                </button>
-            </div>
+        <section className='space-y-6'>
+            <header className='flex items-baseline justify-between gap-4'>
+                <div>
+                    <h2 className='text-xl font-semibold'>
+                        Stage 3 — Architecture
+                    </h2>
+                    <p className='text-sm text-muted-foreground'>
+                        {projectName}
+                    </p>
+                </div>
+                <div className='flex gap-2'>
+                    {!busy && (
+                        <button
+                            onClick={handleGenerate}
+                            className='inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:opacity-90'
+                        >
+                            {hasDiagrams
+                                ? 'Regenerate Diagrams'
+                                : 'Generate Diagrams'}
+                        </button>
+                    )}
+                    {hasDiagrams && (
+                        <Link
+                            to='/sprint'
+                            className='inline-flex h-9 items-center rounded-md border border-border px-4 text-sm font-medium hover:bg-accent'
+                        >
+                            Continue to Sprint →
+                        </Link>
+                    )}
+                </div>
+            </header>
 
             {error && (
                 <div className='rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive'>
@@ -125,44 +187,62 @@ export default function ArchitecturePage() {
                 </div>
             )}
 
-            {!generated && !loading && (
-                <p className='text-muted-foreground'>
-                    Click "Generate Diagrams" to create architecture diagrams
-                    from the analysis.
-                </p>
+            {busy && (
+                <div className='rounded-lg border border-border bg-card p-5'>
+                    <div className='flex items-center gap-2'>
+                        <span className='inline-block h-2 w-2 animate-pulse rounded-full bg-primary' />
+                        <p className='text-sm font-medium'>
+                            Generating architecture diagrams…
+                        </p>
+                    </div>
+                    <p className='mt-2 text-xs text-muted-foreground'>
+                        This may take 1–2 minutes as the AI generates Data Flow,
+                        User Flow, System Context, ER, and Deployment diagrams.
+                    </p>
+                </div>
             )}
 
-            {/* Mermaid Diagrams — rendered as SVG */}
-            {mermaidDiagrams.map((d, i) => (
-                <div
-                    key={i}
-                    className='rounded-lg border border-border bg-card p-4'
-                >
-                    <h3 className='mb-3 font-medium'>{d.title}</h3>
-                    <MermaidDiagram dsl={d.dsl} title={d.title} />
-                    <details className='mt-3'>
-                        <summary className='cursor-pointer text-xs text-muted-foreground hover:text-foreground'>
-                            View DSL source
-                        </summary>
-                        <pre className='mt-2 overflow-auto rounded bg-muted p-3 text-xs'>
-                            {d.dsl}
-                        </pre>
-                    </details>
+            {!hasDiagrams && !busy && !error && (
+                <div className='rounded-lg border border-border bg-card p-6 text-center'>
+                    <p className='text-sm text-muted-foreground'>
+                        No diagrams generated yet. Click{' '}
+                        <strong>Generate Diagrams</strong> to create Mermaid and
+                        PlantUML diagrams from the approved analysis.
+                    </p>
                 </div>
-            ))}
+            )}
 
-            {/* PlantUML Diagrams — show DSL code (can't render client-side) */}
-            {plantumlDiagrams.map((d, i) => (
-                <div
-                    key={i}
-                    className='rounded-lg border border-border bg-card p-4'
-                >
-                    <h3 className='mb-3 font-medium'>{d.title}</h3>
-                    <pre className='overflow-auto rounded bg-muted p-4 text-sm'>
-                        {d.dsl}
-                    </pre>
+            {mermaidDiagrams.length > 0 && (
+                <div className='space-y-4'>
+                    <h3 className='text-sm font-medium text-muted-foreground'>
+                        Mermaid Diagrams ({mermaidDiagrams.length})
+                    </h3>
+                    {mermaidDiagrams.map((d, i) => (
+                        <DiagramCard
+                            key={`m-${i}`}
+                            entry={d}
+                            idx={i}
+                            type='mermaid'
+                        />
+                    ))}
                 </div>
-            ))}
+            )}
+
+            {plantumlDiagrams.length > 0 && (
+                <div className='space-y-4'>
+                    <h3 className='text-sm font-medium text-muted-foreground'>
+                        PlantUML Diagrams ({plantumlDiagrams.length})
+                    </h3>
+                    {plantumlDiagrams.map((d, i) => (
+                        <DiagramCard
+                            key={`p-${i}`}
+                            entry={d}
+                            idx={i}
+                            type='plantuml'
+                        />
+                    ))}
+                </div>
+            )}
         </section>
     );
 }
