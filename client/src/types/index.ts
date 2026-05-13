@@ -111,3 +111,64 @@ export interface ApproveResponse {
   final_doc_pdf_s3_key: string;
   final_doc_docx_s3_key: string;
 }
+
+/* Sprint types */
+export interface UserStory {
+  story_id: string;
+  title: string;
+  description: string;
+  acceptance_criteria: string[];
+  story_points: number;
+  role: string;
+  req_id: string;
+}
+
+export interface Sprint {
+  sprint_number: number;
+  sprint_name: string;
+  goal: string;
+  features: string[];
+  stories: UserStory[];
+  total_points: number;
+  man_hours: number;
+  is_mvp_cutoff: boolean;
+}
+
+export interface TeamMember {
+  role: string;
+  count: number;
+  hours_per_sprint: number;
+}
+
+export interface TechStackItem {
+  component: string;
+  technology: string;
+  rationale: string;
+}
+
+export interface SprintRisk {
+  risk_id: string;
+  description: string;
+  category: string;
+  severity: string;
+  mitigation: string;
+  sprint_impacted: number | null;
+}
+
+export interface SprintPlan {
+  total_sprints: number;
+  sprint_duration_weeks: number;
+  total_story_points: number;
+  total_man_hours: number;
+  mvp_cutoff_sprint: number;
+  team_composition: TeamMember[];
+  technology_stack: TechStackItem[];
+  sprints: Sprint[];
+  risk_register: SprintRisk[];
+  generated_at: string;
+}
+
+export interface SprintResponse {
+  project_id: string;
+  sprint_plan: SprintPlan | null;
+}

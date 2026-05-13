@@ -9,6 +9,7 @@ import type {
   ApproveResponse,
   CreateProjectResponse,
   RunResponse,
+  SprintResponse,
   UploadFileResponse,
 } from "../types";
 
@@ -24,9 +25,7 @@ export const projectsApi = {
     const form = new FormData();
     form.append("file", file);
     return http
-      .post<UploadFileResponse>(`/projects/${id}/files`, form, {
-        headers: { "Content-Type": "multipart/form-data" },
-      })
+      .post<UploadFileResponse>(`/projects/${id}/files`, form)
       .then((r) => r.data);
   },
 
@@ -57,5 +56,10 @@ export const projectsApi = {
   events: (id: string) =>
     http
       .get<{ project_id: string; events: unknown[] }>(`/projects/${id}/events`)
+      .then((r) => r.data),
+
+  generateSprint: (id: string) =>
+    http
+      .post<SprintResponse>(`/projects/${id}/sprint`)
       .then((r) => r.data),
 };
