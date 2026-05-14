@@ -62,11 +62,17 @@ def call_structured_json(prompt: str, fallback: dict[str, Any]) -> dict[str, Any
         try:
             from langchain_groq import ChatGroq
 
+            log.info("[llm] call_structured_json provider=groq model=%s prompt_chars=%d", settings.default_model_name, len(prompt))
             model = ChatGroq(model=settings.default_model_name, api_key=settings.groq_api_key, temperature=0)
             message = model.invoke(prompt)
             parsed = _safe_json_parse(str(message.content))
-            return parsed if isinstance(parsed, dict) else fallback
-        except Exception:
+            ok = isinstance(parsed, dict)
+            log.info("[llm] response provider=groq parsed_ok=%s response_chars=%d", ok, len(str(message.content)))
+            if not ok:
+                log.warning("[llm] groq response was not valid JSON: %.200s", str(message.content))
+            return parsed if ok else fallback
+        except Exception as e:
+            log.warning("[llm] groq call failed: %s — using fallback", e)
             return fallback
 
     log.info("[llm] no usable provider configured (provider=%s) — using fallback", provider)

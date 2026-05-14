@@ -59,13 +59,13 @@ def architecture_node(state: GraphState) -> dict[str, Any]:
 
     result = {
         "mermaid": [
-            {"title": "Data Flow Diagram", "type": "dfd", "dsl": dfd},
-            {"title": "User Flow", "type": "user_flow", "dsl": user_flow},
+            {"title": "Data Flow Diagram", "dsl": dfd["dsl"], "explanation": dfd["explanation"]},
+            {"title": "User Flow", "dsl": user_flow["dsl"], "explanation": user_flow["explanation"]},
         ],
         "plantuml": [
-            {"title": "System Architecture", "type": "system", "dsl": system},
-            {"title": "ER Diagram", "type": "er", "dsl": er},
-            {"title": "Deployment Diagram", "type": "deployment", "dsl": deployment},
+            {"title": "System Architecture", "dsl": system["dsl"], "explanation": system["explanation"]},
+            {"title": "ER Diagram", "dsl": er["dsl"], "explanation": er["explanation"]},
+            {"title": "Deployment Diagram", "dsl": deployment["dsl"], "explanation": deployment["explanation"]},
         ],
     }
 

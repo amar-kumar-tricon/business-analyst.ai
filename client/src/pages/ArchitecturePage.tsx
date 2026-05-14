@@ -10,6 +10,7 @@ import {useCallback, useEffect, useRef, useState} from 'react';
 import {Link} from 'react-router-dom';
 
 import {projectsApi} from '../api/projects';
+import {encodePlantUML} from '../lib/plantuml';
 import {useAppStore} from '../store/useAppStore';
 
 import type {DiagramEntry} from '../types';
@@ -52,6 +53,35 @@ function MermaidDiagram({dsl, id}: {dsl: string; id: string}) {
     return <div ref={ref} className='overflow-auto' />;
 }
 
+function PlantUMLDiagram({dsl}: {dsl: string}) {
+    const url = `https://www.plantuml.com/plantuml/svg/${encodePlantUML(dsl)}`;
+    const [error, setError] = useState(false);
+
+    if (error) {
+        return (
+            <div className='space-y-2'>
+                <p className='text-xs text-destructive'>
+                    Failed to render PlantUML diagram.
+                </p>
+                <pre className='max-h-60 overflow-auto rounded border border-border bg-muted p-3 text-xs'>
+                    {dsl}
+                </pre>
+            </div>
+        );
+    }
+
+    return (
+        <div className='overflow-auto rounded border border-border bg-white p-2'>
+            <img
+                src={url}
+                alt='PlantUML diagram'
+                onError={() => setError(true)}
+                className='max-w-full'
+            />
+        </div>
+    );
+}
+
 function DiagramCard({
     entry,
     idx,
@@ -81,9 +111,7 @@ function DiagramCard({
             {type === 'mermaid' ? (
                 <MermaidDiagram dsl={entry.dsl} id={`${type}-${idx}`} />
             ) : (
-                <pre className='max-h-72 overflow-auto rounded border border-border bg-muted p-3 text-xs'>
-                    {entry.dsl}
-                </pre>
+                <PlantUMLDiagram dsl={entry.dsl} />
             )}
 
             <button
@@ -92,7 +120,7 @@ function DiagramCard({
             >
                 {showCode ? 'Hide code' : 'Show code'}
             </button>
-            {showCode && type === 'mermaid' && (
+            {showCode && (
                 <pre className='max-h-60 overflow-auto rounded border border-border bg-muted p-3 text-xs'>
                     {entry.dsl}
                 </pre>
