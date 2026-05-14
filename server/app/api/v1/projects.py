@@ -18,6 +18,7 @@ from app.services.workflow import (
     approve_and_export,
     get_project_state,
     init_project_state,
+    reopen_discovery,
     resume_discovery,
     run_sprint_planning,
     run_stage1_and_discovery,
@@ -189,6 +190,24 @@ def answer_discovery(project_id: str, payload: AnswerRequest) -> dict:
         selected_option_index=payload.selected_option_index,
         terminate=payload.terminate,
     )
+    save_state_snapshot(project_id, updated)
+
+    return {
+        "project_id": project_id,
+        "current_question": updated.get("current_question"),
+        "qa_history_count": len(updated.get("qa_history", [])),
+        "final_doc_markdown": updated.get("final_doc_markdown"),
+    }
+
+
+@projects_router.post("/{project_id}/discovery/reopen")
+def reopen_project_discovery(project_id: str) -> dict:
+    """Reopen discovery after sprint denial — resets termination and returns next question."""
+    state = get_project_state(project_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="Project runtime state not found")
+
+    updated = reopen_discovery(project_id)
     save_state_snapshot(project_id, updated)
 
     return {

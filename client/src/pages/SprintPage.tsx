@@ -13,11 +13,27 @@ import type { SprintPlan } from "../types";
 
 export default function SprintPage() {
   const projectId = useAppStore((s) => s.projectId);
+  const applyAnswer = useAppStore((s) => s.applyAnswer);
   const nav = useNavigate();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [plan, setPlan] = useState<SprintPlan | null>(null);
   const [approved, setApproved] = useState(false);
+
+  async function handleDeny() {
+    if (!projectId) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await projectsApi.reopenDiscovery(projectId);
+      applyAnswer(res, null);
+      nav("/discovery");
+    } catch (e: unknown) {
+      setError((e as any)?.response?.data?.detail ?? (e instanceof Error ? e.message : "Failed to reopen discovery."));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function handleGenerate() {
     if (!projectId) {
@@ -34,7 +50,10 @@ export default function SprintPage() {
         setPlan(res.sprint_plan);
       }
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Request failed";
+      const detail = (e as any)?.response?.data?.detail ?? (e instanceof Error ? e.message : "Request failed");
+      const msg = typeof detail === "string" && detail.includes("Approve step")
+        ? "Complete the Approve step first — sprint generation requires approved requirements."
+        : detail;
       setError(msg);
     } finally {
       setBusy(false);
@@ -64,10 +83,11 @@ export default function SprintPage() {
         {plan && !approved && (
           <div className="flex gap-2">
             <button
-              onClick={() => nav("/analyser")}
-              className="rounded-md border border-destructive px-5 py-2 text-sm font-medium text-destructive hover:bg-destructive/10 transition-colors"
+              onClick={handleDeny}
+              disabled={busy}
+              className="rounded-md border border-destructive px-5 py-2 text-sm font-medium text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
             >
-              Deny
+              {busy ? "Reopening…" : "Deny"}
             </button>
             <button
               onClick={() => setApproved(true)}

@@ -238,6 +238,32 @@ def resume_discovery(
     return _save(state)
 
 
+def reopen_discovery(project_id: str) -> GraphState:
+    """Reopen discovery after sprint denial — resets termination flag and generates the next question."""
+    state = deepcopy(_PROJECT_STATES[project_id])
+    log.info("[workflow] reopen_discovery START project_id=%s qa_history=%d", project_id, len(state.get("qa_history", [])))
+
+    state["discovery_terminated"] = False
+    state["final_doc_markdown"] = None
+    state["final_doc_pdf_s3_key"] = None
+    state["final_doc_docx_s3_key"] = None
+    state["current_question"] = None
+
+    _merge_state(state, prioritize_questions_node(state))
+    _merge_state(state, generate_question_node(state))
+
+    if state.get("current_question") is None:
+        # All questions exhausted — immediately finalize again
+        _merge_state(state, finalize_doc_node(state))
+        _emit(state, "finalize_doc_node", "document_ready", {})
+        log.info("[workflow] reopen_discovery: no new questions, finalized immediately")
+    else:
+        _emit(state, "generate_question_node", "question_ready", {"question_id": state["current_question"]["question_id"]})
+        log.info("[workflow] reopen_discovery: next question qid=%s", state["current_question"]["question_id"])
+
+    return _save(state)
+
+
 def approve_and_export(project_id: str, user_edits_payload: dict | None = None) -> GraphState:
     """Finalize approved output, build approved index, and export artifacts."""
     state = deepcopy(_PROJECT_STATES[project_id])
@@ -291,6 +317,11 @@ def run_sprint_planning(project_id: str) -> GraphState:
 
     if state.get("analyser_output") is None:
         raise ValueError("analyser_output is missing — run POST /run first to generate it.")
+
+    if state.get("review_2_status") != "approved":
+        raise ValueError(
+            "Project has not been approved yet — complete the Approve step before generating a sprint plan."
+        )
 
     updates = sprint_plan_node(state)
     state.update(updates)

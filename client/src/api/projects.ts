@@ -62,4 +62,9 @@ export const projectsApi = {
     http
       .post<SprintResponse>(`/projects/${id}/sprint`)
       .then((r) => r.data),
+
+  reopenDiscovery: (id: string) =>
+    http
+      .post<AnswerResponse>(`/projects/${id}/discovery/reopen`)
+      .then((r) => r.data),
 };
