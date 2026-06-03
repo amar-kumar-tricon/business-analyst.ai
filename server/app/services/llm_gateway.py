@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import logging
 from typing import Any
 
@@ -11,9 +12,10 @@ log = logging.getLogger(__name__)
 
 
 def _safe_json_parse(text: str) -> dict[str, Any] | None:
-    """Try to parse JSON text; return None if parsing fails."""
+    """Try to parse JSON text; strips markdown fences before parsing."""
     try:
-        return json.loads(text)
+        clean = re.sub(r"```[a-zA-Z]*\n?", "", text).strip()
+        return json.loads(clean)
     except Exception:
         return None
 
@@ -54,6 +56,17 @@ def call_structured_json(prompt: str, fallback: dict[str, Any]) -> dict[str, Any
             return parsed if ok else fallback
         except Exception as e:
             log.warning("[llm] anthropic call failed: %s — using fallback", e)
+            return fallback
+
+    if settings.default_model_provider == "groq" and settings.groq_api_key:
+        try:
+            from langchain_groq import ChatGroq
+
+            model = ChatGroq(model=settings.default_model_name, api_key=settings.groq_api_key, temperature=0)
+            message = model.invoke(prompt)
+            parsed = _safe_json_parse(str(message.content))
+            return parsed if isinstance(parsed, dict) else fallback
+        except Exception:
             return fallback
 
     log.info("[llm] no usable provider configured (provider=%s) — using fallback", provider)

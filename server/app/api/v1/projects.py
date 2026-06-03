@@ -18,7 +18,9 @@ from app.services.workflow import (
     approve_and_export,
     get_project_state,
     init_project_state,
+    reopen_discovery,
     resume_discovery,
+    run_sprint_planning,
     run_stage1_and_discovery,
 )
 from app.shared.event_bus import event_bus
@@ -198,6 +200,24 @@ def answer_discovery(project_id: str, payload: AnswerRequest) -> dict:
     }
 
 
+@projects_router.post("/{project_id}/discovery/reopen")
+def reopen_project_discovery(project_id: str) -> dict:
+    """Reopen discovery after sprint denial — resets termination and returns next question."""
+    state = get_project_state(project_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="Project runtime state not found")
+
+    updated = reopen_discovery(project_id)
+    save_state_snapshot(project_id, updated)
+
+    return {
+        "project_id": project_id,
+        "current_question": updated.get("current_question"),
+        "qa_history_count": len(updated.get("qa_history", [])),
+        "final_doc_markdown": updated.get("final_doc_markdown"),
+    }
+
+
 @projects_router.post("/{project_id}/approve")
 def approve_project(project_id: str, payload: ApproveRequest) -> dict:
     """Approve project output and generate final artifacts."""
@@ -222,6 +242,22 @@ def approve_project(project_id: str, payload: ApproveRequest) -> dict:
         "status": "approved",
         "final_doc_pdf_s3_key": updated.get("final_doc_pdf_s3_key"),
         "final_doc_docx_s3_key": updated.get("final_doc_docx_s3_key"),
+    }
+
+
+@projects_router.post("/{project_id}/sprint")
+async def generate_sprint_plan(project_id: str) -> dict:
+    """Generate a sprint plan from the project's analyser output and persist it."""
+    try:
+        updated = run_sprint_planning(project_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    save_state_snapshot(project_id, updated)
+
+    return {
+        "project_id": project_id,
+        "sprint_plan": updated.get("sprint_plan"),
     }
 
 

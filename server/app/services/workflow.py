@@ -20,6 +20,7 @@ from app.agents.graph import (
     ingest_node,
     raw_rag_index_node,
 )
+from app.agents.sprint.nodes.plan import sprint_plan_node
 from app.shared.event_bus import event_bus
 from app.shared.state_types import GraphState, ParsedDocument, ParsedSection, StreamEvent
 
@@ -99,6 +100,7 @@ def init_project_state(project_id: str, name: str, additional_context: str = "")
         "review_1_status": "approved",
         "review_2_status": "pending",
         "user_edits_payload": None,
+        "sprint_plan": None,
         "delta_changes": [],
         "streaming_events": [],
         "llm_config": {},
@@ -236,6 +238,32 @@ def resume_discovery(
     return _save(state)
 
 
+def reopen_discovery(project_id: str) -> GraphState:
+    """Reopen discovery after sprint denial — resets termination flag and generates the next question."""
+    state = deepcopy(_PROJECT_STATES[project_id])
+    log.info("[workflow] reopen_discovery START project_id=%s qa_history=%d", project_id, len(state.get("qa_history", [])))
+
+    state["discovery_terminated"] = False
+    state["final_doc_markdown"] = None
+    state["final_doc_pdf_s3_key"] = None
+    state["final_doc_docx_s3_key"] = None
+    state["current_question"] = None
+
+    _merge_state(state, prioritize_questions_node(state))
+    _merge_state(state, generate_question_node(state))
+
+    if state.get("current_question") is None:
+        # All questions exhausted — immediately finalize again
+        _merge_state(state, finalize_doc_node(state))
+        _emit(state, "finalize_doc_node", "document_ready", {})
+        log.info("[workflow] reopen_discovery: no new questions, finalized immediately")
+    else:
+        _emit(state, "generate_question_node", "question_ready", {"question_id": state["current_question"]["question_id"]})
+        log.info("[workflow] reopen_discovery: next question qid=%s", state["current_question"]["question_id"])
+
+    return _save(state)
+
+
 def approve_and_export(project_id: str, user_edits_payload: dict | None = None) -> GraphState:
     """Finalize approved output, build approved index, and export artifacts."""
     state = deepcopy(_PROJECT_STATES[project_id])
@@ -267,5 +295,36 @@ def approve_and_export(project_id: str, user_edits_payload: dict | None = None) 
         state.get("final_doc_pdf_s3_key"),
         state.get("final_doc_docx_s3_key"),
     )
+
+    return _save(state)
+
+
+def run_sprint_planning(project_id: str) -> GraphState:
+    """Run the sprint planning node and persist the result into state."""
+    # Prefer in-memory runtime state; fall back to persisted snapshot
+    state = _PROJECT_STATES.get(project_id)
+    if state is None:
+        from app.services.persistence import load_state_snapshot
+
+        persisted = load_state_snapshot(project_id)
+        if persisted is None:
+            raise ValueError(f"No state found for project {project_id}")
+        # Load snapshot into runtime so subsequent calls can use it
+        _PROJECT_STATES[project_id] = persisted
+        state = persisted
+
+    state = deepcopy(state)
+
+    if state.get("analyser_output") is None:
+        raise ValueError("analyser_output is missing — run POST /run first to generate it.")
+
+    if state.get("review_2_status") != "approved":
+        raise ValueError(
+            "Project has not been approved yet — complete the Approve step before generating a sprint plan."
+        )
+
+    updates = sprint_plan_node(state)
+    state.update(updates)
+    _emit(state, "sprint_plan_node", "sprint_plan_ready", {"total_sprints": state["sprint_plan"]["total_sprints"]})
 
     return _save(state)
