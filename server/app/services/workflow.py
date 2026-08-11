@@ -9,6 +9,7 @@ from typing import Literal
 from app.agents.analyser.nodes.analyse import analyse_node
 from app.agents.analyser.nodes.enrich import enrich_node
 from app.agents.analyser.nodes.score import score_node
+from app.agents.architecture.agent import architecture_node
 from app.agents.discovery.nodes.finalize_doc import finalize_doc_node
 from app.agents.discovery.nodes.generate_question import generate_question_node
 from app.agents.discovery.nodes.prioritize import prioritize_questions_node
@@ -96,6 +97,7 @@ def init_project_state(project_id: str, name: str, additional_context: str = "")
         "final_doc_markdown": None,
         "final_doc_pdf_s3_key": None,
         "final_doc_docx_s3_key": None,
+        "architecture_output": None,
         "review_1_status": "approved",
         "review_2_status": "pending",
         "user_edits_payload": None,
@@ -232,6 +234,24 @@ def resume_discovery(
             "[workflow] next question ready qid=%s asked_count=%d",
             state["current_question"]["question_id"], state["questions_asked_count"],
         )
+
+    return _save(state)
+
+
+def run_architecture(project_id: str) -> GraphState:
+    """Run Stage-3 architecture diagram generation."""
+    state = deepcopy(_PROJECT_STATES[project_id])
+
+    state.update(architecture_node(state))
+    _emit(
+        state,
+        "architecture_node",
+        "architecture_ready",
+        {
+            "mermaid_count": len(state.get("architecture_output", {}).get("mermaid", [])),
+            "plantuml_count": len(state.get("architecture_output", {}).get("plantuml", [])),
+        },
+    )
 
     return _save(state)
 

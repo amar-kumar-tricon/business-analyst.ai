@@ -12,6 +12,7 @@
  */
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+
 import { projectsApi } from "../api/projects";
 import { useAppStore } from "../store/useAppStore";
 
@@ -36,7 +37,8 @@ export default function UploadPage() {
   async function handleStart() {
     setError(null);
     if (!name.trim()) return setError("Project name is required.");
-    if (files.length === 0) return setError("Upload at least one document.");
+    if (files.length === 0 && !context.trim())
+      return setError("Upload at least one document or provide context.");
 
     setBusy(true);
     reset();

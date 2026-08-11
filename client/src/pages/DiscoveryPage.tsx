@@ -6,12 +6,14 @@
  * Each answer round POSTs /discovery/answer; the response either gives a new
  * question or signals completion (final_doc_markdown becomes available).
  */
-import { useEffect, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { projectsApi } from "../api/projects";
-import { openProjectStream } from "../api/ws";
-import { formatEventSummary } from "../lib/events";
-import { useAppStore } from "../store/useAppStore";
+import { useEffect, useRef, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+
+import { projectsApi } from '../api/projects';
+import { openProjectStream } from '../api/ws';
+import { formatEventSummary } from '../lib/events';
+import { useAppStore } from '../store/useAppStore';
+
 import type { AnswerStatus } from "../types";
 
 export default function DiscoveryPage() {

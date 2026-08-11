@@ -71,9 +71,10 @@ def _reset_client_after_corruption() -> None:
 
 
 def _embedding_function():
-    if settings.openai_api_key:
+    key = settings.openai_api_key
+    if key and len(key) > 10:
         return embedding_functions.OpenAIEmbeddingFunction(
-            api_key=settings.openai_api_key,
+            api_key=key,
             model_name="text-embedding-3-small",
         )
     return embedding_functions.DefaultEmbeddingFunction()
@@ -204,7 +205,16 @@ def build_approved_index(
         })
 
     if ids:
-        collection.add(ids=ids, documents=documents, metadatas=metadatas)
+        # Deduplicate by chunk id (LLM may produce duplicate entries)
+        seen: set[str] = set()
+        dedup_ids, dedup_docs, dedup_metas = [], [], []
+        for i, cid in enumerate(ids):
+            if cid not in seen:
+                seen.add(cid)
+                dedup_ids.append(cid)
+                dedup_docs.append(documents[i])
+                dedup_metas.append(metadatas[i])
+        collection.add(ids=dedup_ids, documents=dedup_docs, metadatas=dedup_metas)
 
     log.info("[rag] build_approved_index DONE collection=%s records=%d", name, len(ids))
     return ids, name

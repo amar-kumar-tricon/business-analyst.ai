@@ -10,11 +10,13 @@
  * Owns the WebSocket subscription so the user sees node-by-node progress as
  * each LLM/RAG/parser step completes.
  */
-import { useEffect, useRef } from "react";
-import { Link } from "react-router-dom";
-import { openProjectStream } from "../api/ws";
-import { formatEventSummary } from "../lib/events";
-import { useAppStore } from "../store/useAppStore";
+import { useEffect, useRef } from 'react';
+import { Link } from 'react-router-dom';
+
+import { openProjectStream } from '../api/ws';
+import { formatEventSummary } from '../lib/events';
+import { useAppStore } from '../store/useAppStore';
+
 import type { ScoreBreakdown } from "../types";
 
 const CRITERION_LABELS: Record<string, string> = {

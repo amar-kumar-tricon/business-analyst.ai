@@ -33,7 +33,7 @@ log = logging.getLogger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(application: FastAPI):
     """Startup / shutdown lifecycle.
 
     Startup:
@@ -63,8 +63,8 @@ async def lifespan(app: FastAPI):
     log.info("Database ready at %s", settings.database_url)
 
     # 4. compile LangGraph once and expose to request handlers via app.state.graph
-    app.state.graph = get_graph()
-    log.info("LangGraph compiled with %d nodes", len(app.state.graph.nodes))
+    application.state.graph = get_graph()
+    log.info("LangGraph compiled with %d nodes", len(application.state.graph.nodes))
 
     yield
 
